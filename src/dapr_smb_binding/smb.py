@@ -171,7 +171,7 @@ class SmbFileSystem:
 
         return self._call("get", path, fn)
 
-    def write_new(self, path: str, data: bytes) -> None:
+    def create(self, path: str, data: bytes) -> None:
         import smbclient
 
         def fn() -> None:

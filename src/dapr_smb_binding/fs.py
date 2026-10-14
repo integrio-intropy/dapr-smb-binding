@@ -25,7 +25,7 @@ class FileSystem(Protocol):
     def read(self, path: str, *, exclusive: bool = False) -> bytes:
         """exclusive=True denies all sharing: SHARING_VIOLATION if anyone else has the file open."""
 
-    def write_new(self, path: str, data: bytes) -> None:
+    def create(self, path: str, data: bytes) -> None:
         """Create a file that must not exist yet (EXISTS otherwise), with no sharing while writing."""
 
     def rename(self, src: str, dst: str) -> None:

@@ -64,7 +64,7 @@ class LocalFS:
             raise self._missing(path)
         return self._p(path).read_bytes()
 
-    def write_new(self, path: str, data: bytes) -> None:
+    def create(self, path: str, data: bytes) -> None:
         self._hook("write", path)
         p = self._p(path)
         if p.exists():

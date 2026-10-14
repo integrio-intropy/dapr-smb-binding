@@ -62,7 +62,7 @@ class OutputBinding:
         folder, name = split(path)
         tmp = join(folder, self.cfg.temp_file_name_pattern.replace("{name}", name))
         self.fs.makedirs(folder)  # like the SFTP binding
-        self.fs.write_new(tmp, data)
+        self.fs.create(tmp, data)
         try:
             self.fs.rename(tmp, path)
         except BaseException:

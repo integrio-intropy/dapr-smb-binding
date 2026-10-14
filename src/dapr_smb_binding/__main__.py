@@ -23,13 +23,8 @@ from .server import InputService, OutputService, Registry
 
 log = logging.getLogger("dapr_smb_binding")
 
-# The sidecar reads DAPR_COMPONENTS_SOCKETS_FOLDER; the SDKs have used other
-# spellings. Honour all of them, preferring the sidecar's.
-SOCKET_FOLDER_ENVS = (
-    "DAPR_COMPONENTS_SOCKETS_FOLDER",
-    "DAPR_COMPONENT_SOCKETS_FOLDER",
-    "DAPR_COMPONENT_SOCKET_FOLDER",
-)
+# The folder the sidecar scans for component sockets.
+SOCKET_FOLDER_ENV = "DAPR_COMPONENTS_SOCKETS_FOLDER"
 DEFAULT_SOCKET_FOLDER = "/tmp/dapr-components-sockets"  # noqa: S108 - the Dapr convention
 # 4 MiB of payload plus headroom, matching the sidecar's default body limit.
 DEFAULT_MAX_MESSAGE_SIZE = (4 << 20) + (1 << 20)
@@ -81,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
     for noisy in ("smbprotocol", "smbclient", "spnego"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
-    folder = next((os.environ[e] for e in SOCKET_FOLDER_ENVS if os.environ.get(e)), DEFAULT_SOCKET_FOLDER)
+    folder = os.environ.get(SOCKET_FOLDER_ENV) or DEFAULT_SOCKET_FOLDER
     path = os.path.join(folder, f"{args.socket_name}.sock")
     os.makedirs(folder, exist_ok=True)
     if os.path.exists(path):
