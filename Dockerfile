@@ -3,7 +3,10 @@
 ARG PYTHON_VERSION=3.12
 
 # ---------------------------------------------------------------- build wheels
-# The GSSAPI and krb5 bindings are C extensions built against MIT krb5.
+# The GSSAPI and krb5 bindings are C extensions built against MIT krb5, and
+# PyPI has no Linux wheels for them, so they are compiled here. That is the
+# slow part of the build, so the dependencies get a layer of their own that
+# depends on pyproject.toml alone: a code change reuses it from the cache.
 FROM python:${PYTHON_VERSION}-slim AS builder
 
 RUN apt-get update \
@@ -11,10 +14,16 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
-COPY pyproject.toml README.md LICENSE ./
+COPY pyproject.toml ./
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -c "import tomllib; p = tomllib.load(open('pyproject.toml', 'rb'))['project']; \
+print('\n'.join(p['dependencies'] + p['optional-dependencies']['kerberos']))" > /tmp/requirements.txt \
+ && pip wheel --wheel-dir /wheels -r /tmp/requirements.txt
+
+COPY README.md LICENSE ./
 COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip wheel --wheel-dir /wheels '.[kerberos]'
+    pip wheel --no-deps --wheel-dir /wheels .
 
 # ---------------------------------------------------------------- tests
 # Used by tests/integration/docker-compose.yaml; never shipped.
