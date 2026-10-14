@@ -14,8 +14,7 @@ enough, and tickets stay in memory.
 
 Alpha, deliberately minimal: it does what the requirements need and nothing
 more, and grows when a partner or an incident needs it. Operations and metadata
-follow Dapr's SFTP binding; [CONTRACT.md](CONTRACT.md) lists the shared names,
-including the ones reserved for later.
+follow Dapr's SFTP binding; [CONTRACT.md](CONTRACT.md) lists the shared names.
 
 | Operation | Behaviour |
 |---|---|
@@ -105,7 +104,8 @@ again, so retries from the poll loop and the app cannot lock the account out.
 Each of these is a known extension, to add when it is needed:
 
 - **One replica per input component.** Two would deliver the same file twice.
-  Scaling out needs claim-by-rename (reserved in CONTRACT.md as `claimMode`).
+  Scaling out needs a claim step, such as renaming a file into a
+  per-replica folder before reading it.
 - **One inbound file at a time**, waiting for the app's answer before the next.
   No ack timeout of its own: bound it with a Dapr resiliency timeout on the
   component's inbound direction (see CONTRACT.md).

@@ -8,9 +8,8 @@ change of `spec.type` and the connection fields, nothing else.
 Everything it defines is kept. Anything added is marked **ext**, and every
 binding uses the same name and meaning for it.
 
-v1 is deliberately small. Further options are listed under
-[Reserved extensions](#reserved-extensions) with their names fixed in advance,
-and are implemented when a partner or an incident needs them.
+v1 is deliberately small. New options are added when a partner or an
+incident needs them, with the same name and meaning in every binding.
 
 | Binding | `spec.type` | Status |
 |---|---|---|
@@ -114,23 +113,6 @@ smb: rename "out/a.xml.tmp" on smb://fs01.corp.example.com/exchange: ... [NTSTAT
 gRPC status codes let callers branch without parsing: `NOT_FOUND`,
 `ALREADY_EXISTS`, `PERMISSION_DENIED`, `UNAUTHENTICATED`, `INVALID_ARGUMENT`,
 `UNAVAILABLE` (retry later), `INTERNAL`.
-
-## Reserved extensions
-
-Not implemented in v1. The names and meanings are fixed so that whichever
-binding needs one first adds it the same way.
-
-| Field | Values | For |
-|---|---|---|
-| `claimMode` | `none` (v1 behaviour), `rename` | Several replicas: claim a file by renaming it into `processing/<instance>/` first. Needs recovery of claims from replicas that went away. |
-| `tempFileMode` | `name` (v1), `folder`, `none` | Partners that pick up `*`: write in a staging folder, then rename into place. |
-| `tempFolder` | path | Staging folder for `tempFileMode: folder`. |
-| `onTargetExists` | `fail` (v1), `overwrite`, `uniqueName` | Partners that expect files to be replaced, or unique names. |
-| `staleTempFileAge` | duration | Delete our own temp files left by a crash between write and rename. |
-| `completionMarkerPattern` | e.g. `{name}.done` | Partners that wait for a marker after the file. |
-| `requireMarkerPattern` | e.g. `{name}.done` | Partners that write a marker; only pick up a file once it exists. |
-| `stableFor` | duration | Partners whose writes cannot be detected otherwise: wait until size and time stop changing. |
-| `afterRead` | `move` (v1), `delete`, `none` | Partners that want files deleted rather than archived. |
 
 ## Protocol differences
 

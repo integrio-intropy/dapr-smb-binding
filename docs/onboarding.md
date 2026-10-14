@@ -68,7 +68,7 @@ The binding works when the partner does **either** of these:
 |---|---|
 | Writing a temp name and renaming (most tools, BizTalk "use temporary file") | yes; add their temp names to `ignorePatterns` |
 | Writing in place, keeping the file open until done (normal Windows apps) | yes: the file is skipped while they hold it open |
-| Writing in place in several separate opens, or from a non-Windows client | **no**: ask them to write a temp name and rename. (Markers and stability checks are reserved extensions, see CONTRACT.md.) |
+| Writing in place in several separate opens, or from a non-Windows client | **no**: ask them to write a temp name and rename. |
 
 For files we write: we write `name.tmp` and rename it to `name`. The partner
 must not pick up `*.tmp`; if their pattern is `*`, set `tempFileNamePattern` to

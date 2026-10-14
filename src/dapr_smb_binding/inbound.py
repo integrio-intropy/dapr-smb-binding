@@ -7,7 +7,7 @@ is then moved to processedFolder or errorFolder. A crash at any point leaves it
 in inboundPath, so it is delivered again: at least once.
 
 This assumes one replica per input component. Several replicas would deliver
-the same file more than once (see CONTRACT.md, planned extensions).
+the same file more than once.
 """
 
 from __future__ import annotations
