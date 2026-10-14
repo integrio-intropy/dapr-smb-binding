@@ -11,12 +11,6 @@ binding uses the same name and meaning for it.
 v1 is deliberately small. New options are added when a partner or an
 incident needs them, with the same name and meaning in every binding.
 
-| Binding | `spec.type` | Status |
-|---|---|---|
-| [dapr-smb-binding](https://github.com/integrio-intropy/dapr-smb-binding) | `bindings.smb` | v1 |
-| [dapr-ftp-binding](https://github.com/integrio-intropy/dapr-ftp-binding) | `bindings.ftp` | SFTP base; see [Gaps](#gaps-in-the-other-bindings) |
-| Dapr built-in | `bindings.sftp` | The base, no extensions |
-
 ## Component metadata
 
 ### Connection (protocol-specific)
@@ -121,13 +115,3 @@ gRPC status codes let callers branch without parsing: `NOT_FOUND`,
 | SMB | refused (`STATUS_OBJECT_NAME_COLLISION`) | exclusive open refused (`STATUS_SHARING_VIOLATION`) |
 | SFTP | refused by standard rename | not detectable: the partner must write a temp name and rename |
 | FTP | server-specific | not detectable: as SFTP |
-
-## Gaps in the other bindings
-
-To bring `dapr-ftp-binding` to v1:
-
-1. `create` responds with the joined server path (`/upload/hello.txt`); v1
-   responds relative to `rootPath` (`hello.txt`), as SFTP does.
-2. `create` overwrites and does not create parent folders; v1 writes a temp
-   name, renames without overwriting, and creates folders.
-3. No `rename`, `list` `size`/`modTime`, or input binding.
