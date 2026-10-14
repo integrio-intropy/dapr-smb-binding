@@ -1,0 +1,26 @@
+# Used by the "dapr" profile in docker-compose.yaml: one component, used as
+# both an output and an input binding.
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: smb
+spec:
+  type: bindings.smb
+  version: v1
+  metadata:
+    - name: address
+      value: dc.lab.test
+    - name: share
+      value: exchange
+    - name: rootPath
+      value: e2e/out
+    - name: inboundPath
+      value: e2e/in
+    - name: username
+      value: svc-intropy@LAB.TEST
+    - name: password
+      value: "Svc!Passw0rd1"
+    - name: kdcs
+      value: dc.lab.test
+    - name: pollInterval
+      value: 1s

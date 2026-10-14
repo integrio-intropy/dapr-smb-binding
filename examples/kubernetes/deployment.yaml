@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: file-adapter
+spec:
+  replicas: 2   # safe: inbound files are claimed by an atomic rename
+  selector:
+    matchLabels:
+      app: file-adapter
+  template:
+    metadata:
+      labels:
+        app: file-adapter
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "file-adapter"
+        dapr.io/app-port: "8080"
+        dapr.io/inject-pluggable-components: "true"
+        # Files are single gRPC messages. Raise together with the component's
+        # --max-message-size (in component.yaml args) for files over ~4 MiB.
+        # dapr.io/max-body-size: "16Mi"
+    spec:
+      # If the customer's DNS is not reachable from the cluster, map the file
+      # server and DCs here. Kerberos needs the real FQDN, never an IP.
+      # hostAliases:
+      #   - ip: 10.20.0.10
+      #     hostnames: [fs01.corp.example.com]
+      #   - ip: 10.20.0.5
+      #     hostnames: [dc1.corp.example.com]
+      volumes:
+        # krb5.conf and keytab for the injected smb-binding container. Memory
+        # backed, so the keytab never reaches a node disk.
+        - name: smb-binding-runtime
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+      containers:
+        - name: app
+          image: your-registry/file-adapter:latest
+          ports:
+            - containerPort: 8080

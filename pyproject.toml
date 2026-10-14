@@ -1,0 +1,61 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dapr-smb-binding"
+dynamic = ["version"]
+description = "SMB (Kerberos-only by default) input and output binding for Dapr, as a pluggable component"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.12"
+authors = [{ name = "Integrio Intropy" }]
+dependencies = [
+  "smbprotocol>=1.17,<2",
+  "pyspnego>=0.12,<1",
+  "grpcio>=1.84,<2",
+  "grpcio-reflection>=1.84,<2",
+  "protobuf>=7.35.1,<8",
+  "prometheus-client>=0.21,<1",
+]
+
+[project.optional-dependencies]
+# Kerberos needs the GSSAPI C extension and MIT krb5 at runtime. The container
+# image always installs it; local unit tests do not need it.
+kerberos = ["smbprotocol[kerberos]>=1.17,<2"]
+dev = [
+  "pytest>=8",
+  "grpcio-tools>=1.84,<2",
+  "ruff>=0.6",
+]
+
+[project.scripts]
+smb-binding = "dapr_smb_binding.__main__:main"
+
+[tool.hatch.version]
+path = "src/dapr_smb_binding/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dapr_smb_binding"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit"]
+addopts = "-ra"
+markers = ["integration: needs the Samba AD DC from tests/integration (make integration)"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+# poc/ is kept verbatim as the evidence the design was validated with.
+extend-exclude = ["src/dapr_smb_binding/_proto", "poc"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "SIM"]
+ignore = [
+  "S101",   # assert is fine in tests
+  "E501",   # the formatter owns line length; long messages stay greppable
+  "SIM102", "SIM105",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S"]
