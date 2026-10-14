@@ -10,10 +10,7 @@ metadata:
       {
         "name": "smb-binding",
         "image": "harbor.intropy.io/platform/dapr-smb-binding:v0.1.0",
-        "args": ["--metrics-port", "9464", "--log-format", "json"],
-        "env": [
-          { "name": "POD_NAME", "valueFrom": { "fieldRef": { "fieldPath": "metadata.name" } } }
-        ],
+        "args": ["--health-port", "9464"],
         "volumeMounts": [
           { "name": "dapr-unix-domain-socket", "mountPath": "/tmp/dapr-components-sockets" },
           { "name": "smb-binding-runtime", "mountPath": "/tmp/dapr-smb-binding" }
@@ -58,27 +55,10 @@ spec:
     - name: kdcs
       value: dc1.corp.example.com,dc2.corp.example.com
 
-    # --- outbound (we write, partner reads). Defaults shown; usually omit.
-    - name: tempFileMode
-      value: name
-    - name: tempFileNamePattern
-      value: "{name}.tmp"
-    - name: onTargetExists
-      value: fail
-    - name: staleTempFileAge
-      value: 1h
-
     # --- inbound (partner writes, we read)
     - name: inboundPath
       value: out/to-intropy
     - name: filePattern
       value: "*.xml"
-    - name: pollInterval
-      value: 10s
-    # Only if the partner writes in place without keeping the file open:
-    # - name: requireMarkerPattern
-    #   value: "{name}.done"
-    # - name: stableFor
-    #   value: 30s
 auth:
   secretStore: kubernetes

@@ -1,6 +1,5 @@
 # Component metadata manifest, following the components-contrib convention.
-# Field names follow the SFTP binding; extensions are the Intropy file binding
-# contract (CONTRACT.md).
+# Names follow the SFTP binding; extensions are in CONTRACT.md.
 schemaVersion: v1
 type: bindings
 name: smb
@@ -15,26 +14,20 @@ binding:
   input: true
   operations:
     - name: create
-      description: "Write the request data to fileName via a temp file and an atomic rename."
+      description: "Write to a temp name, then rename to fileName. Never overwrites."
     - name: get
-      description: "Read fileName and return it as the response data."
+      description: "Read fileName."
     - name: list
-      description: "List the folder given in fileName, defaulting to rootPath."
+      description: "List the folder in fileName, defaulting to rootPath."
     - name: delete
       description: "Delete fileName."
     - name: rename
-      description: "Rename fileName to newFileName; never overwrites unless onTargetExists says so."
+      description: "Rename fileName to newFileName. Never overwrites."
 authenticationProfiles:
   - title: "Kerberos with password"
-    description: "The default. A TGT is obtained in memory at each session setup."
     metadata:
-      - name: authMode
-        required: false
-        default: '"kerberos-password"'
-        example: '"kerberos-password"'
       - name: username
         required: true
-        description: "Kerberos principal, user@REALM."
         example: '"svc-intropy@CORP.EXAMPLE.COM"'
       - name: password
         required: true
@@ -48,49 +41,35 @@ authenticationProfiles:
       - name: keytab
         required: true
         sensitive: true
-        description: "The keytab file, base64. Must contain AES keys."
+        description: "The keytab file, base64, with AES keys."
         example: '"BQIAAABH..."'
       - name: username
         required: false
         description: "Principal to use from the keytab; the first one if empty."
         example: '"svc-intropy@CORP.EXAMPLE.COM"'
-  - title: "NTLM (explicit opt-in)"
-    description: "Deprecated by Microsoft and often blocked. Never used as a fallback."
-    metadata:
-      - name: authMode
-        required: true
-        example: '"ntlm"'
-      - name: username
-        required: true
-        example: '"svc-intropy"'
-      - name: password
-        required: true
-        sensitive: true
-        example: '"*****"'
 metadata:
   - name: address
     required: true
-    description: "File server FQDN as registered in AD (SPN cifs/<fqdn>), optionally with :port. Never an IP under Kerberos."
+    description: "File server FQDN as registered in AD (SPN cifs/<fqdn>), optionally :port. Never an IP."
     example: '"fs01.corp.example.com"'
     type: string
   - name: share
     required: true
-    description: "Share name."
     example: '"exchange"'
     type: string
   - name: rootPath
     required: true
-    description: "Folder inside the share for output operations. Joined, not confined."
+    description: "Folder inside the share for output operations."
     example: '"in/from-intropy"'
     type: string
   - name: realm
     required: false
-    description: "Kerberos realm. Derived from username when it is user@REALM."
+    description: "Kerberos realm; derived from username when it is user@REALM."
     example: '"CORP.EXAMPLE.COM"'
     type: string
   - name: kdcs
     required: false
-    description: "Comma-separated KDCs. Without them KDCs are found through DNS SRV records."
+    description: "Comma-separated KDCs. Without them, KDCs are found through DNS."
     example: '"dc1.corp.example.com,dc2.corp.example.com"'
     type: string
   - name: requireEncryption
@@ -103,38 +82,10 @@ metadata:
     default: '"30s"'
     example: '"30s"'
     type: duration
-  - name: tempFileMode
-    required: false
-    default: '"name"'
-    allowedValues: ["none", "name", "folder"]
-    example: '"name"'
-    type: string
   - name: tempFileNamePattern
     required: false
     default: '"{name}.tmp"'
     example: '".{name}"'
-    type: string
-  - name: tempFolder
-    required: false
-    default: '"_staging"'
-    example: '"_staging"'
-    type: string
-  - name: onTargetExists
-    required: false
-    default: '"fail"'
-    allowedValues: ["fail", "overwrite", "uniqueName"]
-    example: '"fail"'
-    type: string
-  - name: staleTempFileAge
-    required: false
-    description: >
-      Delete our own temp files older than this. Empty disables cleanup. Use 10m
-      or more: it compares the server's file time with the component's clock.
-    example: '"1h"'
-    type: duration
-  - name: completionMarkerPattern
-    required: false
-    example: '"{name}.done"'
     type: string
   - name: inboundPath
     required: false
@@ -148,54 +99,20 @@ metadata:
     type: string
   - name: ignorePatterns
     required: false
-    example: '"*.tmp,~*,*.lock"'
+    example: '"*.tmp,~*"'
     type: string
   - name: pollInterval
     required: false
     default: '"10s"'
     example: '"10s"'
     type: duration
-  - name: claimMode
-    required: false
-    default: '"rename"'
-    allowedValues: ["rename", "none"]
-    example: '"rename"'
-    type: string
-  - name: processingFolder
-    required: false
-    default: '"processing"'
-    example: '"processing"'
-    type: string
-  - name: requireMarkerPattern
-    required: false
-    example: '"{name}.done"'
-    type: string
-  - name: stableFor
-    required: false
-    example: '"30s"'
-    type: duration
-  - name: afterRead
-    required: false
-    default: '"move"'
-    allowedValues: ["move", "delete", "none"]
-    example: '"move"'
-    type: string
   - name: processedFolder
     required: false
     default: '"processed"'
     example: '"processed"'
     type: string
-  - name: staleClaimAge
-    required: false
-    default: '"15m"'
-    description: >
-      Return files claimed by a replica whose heartbeat is older than this to
-      inboundPath. Empty never takes over another replica's claims.
-    example: '"15m"'
-    type: duration
   - name: errorFolder
     required: false
     default: '"error"'
-    description: "Where rejected files go. Empty puts them back for another try."
     example: '"error"'
     type: string

@@ -3,7 +3,8 @@ kind: Deployment
 metadata:
   name: file-adapter
 spec:
-  replicas: 2   # safe: inbound files are claimed by an atomic rename
+  # One replica per input component: two would deliver the same file twice.
+  replicas: 1
   selector:
     matchLabels:
       app: file-adapter

@@ -1,9 +1,8 @@
 """gRPC services for the Dapr pluggable component protocol.
 
-The sidecar tells component instances apart with the x-component-instance
-gRPC metadata (the component's name), so one process serves every SMB
-component in the pod. Input and output are separate instances with separate
-Init calls, even for the same component name.
+The sidecar tells component instances apart by the x-component-instance gRPC
+metadata (the component's name), so one process serves every SMB component in
+the pod. Input and output are separate instances, each with its own Init.
 """
 
 from __future__ import annotations
@@ -17,201 +16,136 @@ from dataclasses import dataclass, field
 
 import grpc
 
-from . import metrics
 from ._proto import bindings_pb2 as pb
 from ._proto import bindings_pb2_grpc as pb_grpc
 from ._proto import common_pb2
 from .config import Config, ConfigError, parse
 from .errors import Kind, SmbError
 from .fs import FileSystem
-from .inbound import Claimed, Inbound
+from .inbound import Inbound
 from .output import OPERATIONS, OutputBinding
 
 log = logging.getLogger(__name__)
 
-INSTANCE_ID_KEY = "x-component-instance"
-DEFAULT_INSTANCE = "__default__"
-# Headroom between --max-message-size and the largest inbound file, for
-# protobuf framing and metadata.
+# Room for protobuf framing and metadata between a file and the message limit.
 MESSAGE_OVERHEAD = 64 * 1024
 
-FileSystemFactory = Callable[[Config, str], FileSystem]
+_STATUS = {
+    Kind.NOT_FOUND: grpc.StatusCode.NOT_FOUND,
+    Kind.EXISTS: grpc.StatusCode.ALREADY_EXISTS,
+    Kind.ACCESS_DENIED: grpc.StatusCode.PERMISSION_DENIED,
+    Kind.AUTH: grpc.StatusCode.UNAUTHENTICATED,
+    Kind.INVALID: grpc.StatusCode.INVALID_ARGUMENT,
+    Kind.SHARING_VIOLATION: grpc.StatusCode.UNAVAILABLE,
+    Kind.RECONNECT: grpc.StatusCode.UNAVAILABLE,
+}
 
 
-def _instance(context: grpc.ServicerContext) -> str:
-    for k, v in context.invocation_metadata() or ():
-        if k == INSTANCE_ID_KEY and v:
-            return v
-    return DEFAULT_INSTANCE
+def _name(context: grpc.ServicerContext) -> str:
+    return dict(context.invocation_metadata() or ()).get("x-component-instance") or "default"
 
 
 def _abort(context: grpc.ServicerContext, err: Exception) -> None:
-    code = grpc.StatusCode.INTERNAL
     if isinstance(err, ConfigError):
-        code = grpc.StatusCode.INVALID_ARGUMENT
-    elif isinstance(err, SmbError):
-        code = {
-            Kind.NOT_FOUND: grpc.StatusCode.NOT_FOUND,
-            Kind.EXISTS: grpc.StatusCode.ALREADY_EXISTS,
-            Kind.ACCESS_DENIED: grpc.StatusCode.PERMISSION_DENIED,
-            Kind.AUTH: grpc.StatusCode.UNAUTHENTICATED,
-            Kind.CONFIG: grpc.StatusCode.INVALID_ARGUMENT,
-            Kind.SHARING_VIOLATION: grpc.StatusCode.UNAVAILABLE,
-            Kind.RECONNECT: grpc.StatusCode.UNAVAILABLE,
-        }.get(err.kind, grpc.StatusCode.INTERNAL)
+        context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(err))
+    code = (
+        _STATUS.get(err.kind, grpc.StatusCode.INTERNAL)
+        if isinstance(err, SmbError)
+        else grpc.StatusCode.INTERNAL
+    )
     context.abort(code, str(err))
 
 
 @dataclass
-class _Output:
+class Instance:
     cfg: Config
     fs: FileSystem
-    binding: OutputBinding
-
-
-@dataclass
-class _Input:
-    cfg: Config
-    fs: FileSystem
-    inbound: Inbound
+    output: OutputBinding | None = None
+    inbound: Inbound | None = None
     stream_open: bool = False
-    stream_ever_opened: bool = False
+    stream_was_open: bool = False
     stop: threading.Event = field(default_factory=threading.Event)
 
 
 class Registry:
-    """One instance per (direction, component name); closed on re-Init and shutdown."""
-
-    def __init__(self, fs_factory: FileSystemFactory, *, instance_id: str, max_message_size: int):
+    def __init__(self, fs_factory: Callable[[Config, str], FileSystem], *, max_message_size: int):
         self.fs_factory = fs_factory
-        self.instance_id = instance_id
         self.max_message_size = max_message_size
         self._lock = threading.Lock()
-        self.outputs: dict[str, _Output] = {}
-        self.inputs: dict[str, _Input] = {}
+        self.outputs: dict[str, Instance] = {}
+        self.inputs: dict[str, Instance] = {}
 
-    def _build(self, props: dict[str, str], name: str, folder: str) -> tuple[Config, FileSystem]:
+    def init(self, kind: str, name: str, props: dict[str, str]) -> None:
         cfg, warns = parse(props)
         for w in warns:
             log.warning("%s: %s", name, w)
         fs = self.fs_factory(cfg, name)
         try:
-            # Fail at startup on a bad address, share or credentials, like the SFTP
-            # binding does, rather than at the first request.
-            fs.ping()
+            fs.ping()  # bad address, share or credentials fail Init, as in the SFTP binding
         except Exception:
             fs.close()
             raise
-        path = cfg.read.inbound_path if folder == "inboundPath" else cfg.root_path
-        try:
-            if not fs.stat(path).is_dir:
-                log.warning("%s: %s %r is a file, not a folder", name, folder, path)
-        except SmbError as e:
-            # Not fatal: create makes missing folders, and the folder may be created later.
-            log.warning("%s: %s %r is not usable yet: %s", name, folder, path, e)
-        return cfg, fs
-
-    def init_output(self, name: str, props: dict[str, str]) -> None:
-        cfg, fs = self._build(props, name, "rootPath")
+        inst = Instance(cfg, fs)
+        if kind == "output":
+            inst.output = OutputBinding(cfg, fs)
+        else:
+            inst.inbound = Inbound(cfg, fs, max_file_size=self.max_message_size - MESSAGE_OVERHEAD)
+        table = self.outputs if kind == "output" else self.inputs
         with self._lock:
-            old = self.outputs.get(name)
-            self.outputs[name] = _Output(cfg, fs, OutputBinding(cfg, fs, component=name))
-        if old:
-            old.fs.close()
-        log.info(
-            "%s: output binding ready: target=%s rootPath=%r authMode=%s tempFileMode=%s onTargetExists=%s",
-            name,
-            cfg.target,
-            cfg.root_path,
-            cfg.auth_mode,
-            cfg.write.temp_file_mode,
-            cfg.write.on_target_exists,
-        )
-
-    def init_input(self, name: str, props: dict[str, str]) -> None:
-        cfg, fs = self._build(props, name, "inboundPath")
-        inbound = Inbound(
-            fs,
-            cfg.read,
-            cfg.write,
-            instance_id=self.instance_id,
-            max_file_size=self.max_message_size - MESSAGE_OVERHEAD,
-            labels={"component": name, "target": cfg.target},
-        )
-        inp = _Input(cfg, fs, inbound)
-        inbound.start_heartbeat(inp.stop)
-        with self._lock:
-            old = self.inputs.get(name)
-            self.inputs[name] = inp
-        if old:
+            old, table[name] = table.get(name), inst
+        if old:  # Init again (hot reload): retire the previous instance
             old.stop.set()
             old.fs.close()
         log.info(
-            "%s: input binding ready: target=%s inboundPath=%r filePattern=%s claimMode=%s afterRead=%s "
-            "pollInterval=%ss processing=%r",
+            "%s: %s binding ready on %s (rootPath=%r inboundPath=%r)",
             name,
+            kind,
             cfg.target,
-            cfg.read.inbound_path,
-            ",".join(cfg.read.file_patterns),
-            cfg.read.claim_mode,
-            cfg.read.after_read,
-            cfg.read.poll_interval,
-            inbound.processing_dir,
+            cfg.root_path,
+            cfg.inbound_path,
         )
 
     def health(self) -> tuple[bool, str]:
-        with self._lock:
-            broken = [n for n, i in self.inputs.items() if i.stream_ever_opened and not i.stream_open]
-        if broken:
-            return False, "input stream closed and not reopened by the sidecar: " + ", ".join(broken)
-        return True, "ok"
+        """Unhealthy once an input stream has closed: the sidecar never reopens it, a restart does."""
+        broken = [n for n, i in self.inputs.items() if i.stream_was_open and not i.stream_open]
+        return (False, "input stream closed: " + ", ".join(broken)) if broken else (True, "ok")
 
     def close_all(self) -> None:
         with self._lock:
-            outs, ins = list(self.outputs.items()), list(self.inputs.items())
+            instances = [*self.outputs.values(), *self.inputs.values()]
             self.outputs, self.inputs = {}, {}
-        for name, i in ins:
+        for i in instances:
             i.stop.set()
-            _close(name, i.fs)
-        for name, o in outs:
-            _close(name, o.fs)
-
-
-def _close(name: str, fs: FileSystem) -> None:
-    try:
-        fs.close()
-    except Exception as e:  # noqa: BLE001
-        log.warning("%s: closing: %s", name, e)
+            i.fs.close()
 
 
 class OutputService(pb_grpc.OutputBindingServicer):
     def __init__(self, reg: Registry):
         self.reg = reg
 
-    def _get(self, context: grpc.ServicerContext) -> _Output:
-        name = _instance(context)
-        o = self.reg.outputs.get(name)
-        if o is None:
+    def _get(self, context) -> Instance:
+        inst = self.reg.outputs.get(_name(context))
+        if inst is None:
             context.abort(
-                grpc.StatusCode.FAILED_PRECONDITION, f"smb: output binding {name!r} is not initialised"
+                grpc.StatusCode.FAILED_PRECONDITION,
+                f"smb: output binding {_name(context)!r} is not initialised",
             )
-        return o
+        return inst
 
     def Init(self, request, context):  # noqa: N802
-        name = _instance(context)
         try:
-            self.reg.init_output(name, dict(request.metadata.properties))
+            self.reg.init("output", _name(context), dict(request.metadata.properties))
         except (ConfigError, SmbError) as e:
-            log.error("%s: output init failed: %s", name, e)
+            log.error("%s: init failed: %s", _name(context), e)
             _abort(context, e)
         return pb.OutputBindingInitResponse()
 
     def Invoke(self, request, context):  # noqa: N802
-        o = self._get(context)
+        inst = self._get(context)
         try:
-            r = o.binding.invoke(request.operation, request.data, dict(request.metadata))
+            r = inst.output.invoke(request.operation, request.data, dict(request.metadata))
         except SmbError as e:
-            log.warning("%s", e, extra={"component": _instance(context), "operation": request.operation})
+            log.warning("%s: %s", _name(context), e)
             _abort(context, e)
         return pb.InvokeResponse(data=r.data, metadata=r.metadata, content_type=r.content_type)
 
@@ -220,9 +154,8 @@ class OutputService(pb_grpc.OutputBindingServicer):
         return pb.ListOperationsResponse(operations=list(OPERATIONS))
 
     def Ping(self, request, context):  # noqa: N802
-        o = self._get(context)
         try:
-            o.fs.ping()
+            self._get(context).fs.ping()
         except SmbError as e:
             _abort(context, e)
         return common_pb2.PingResponse()
@@ -233,156 +166,120 @@ class InputService(pb_grpc.InputBindingServicer):
         self.reg = reg
         self.shutdown = shutdown
 
+    def _get(self, context) -> Instance:
+        inst = self.reg.inputs.get(_name(context))
+        if inst is None:
+            context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                f"smb: input binding {_name(context)!r} is not initialised",
+            )
+        return inst
+
     def Init(self, request, context):  # noqa: N802
-        name = _instance(context)
         try:
-            self.reg.init_input(name, dict(request.metadata.properties))
+            self.reg.init("input", _name(context), dict(request.metadata.properties))
         except (ConfigError, SmbError) as e:
-            log.error("%s: input init failed: %s", name, e)
+            log.error("%s: init failed: %s", _name(context), e)
             _abort(context, e)
         return pb.InputBindingInitResponse()
 
     def Ping(self, request, context):  # noqa: N802
-        name = _instance(context)
-        i = self.reg.inputs.get(name)
-        if i is None:
-            context.abort(
-                grpc.StatusCode.FAILED_PRECONDITION, f"smb: input binding {name!r} is not initialised"
-            )
-        if i.stream_ever_opened and not i.stream_open:
-            context.abort(grpc.StatusCode.UNAVAILABLE, "smb: the sidecar's read stream is closed")
+        inst = self._get(context)
         try:
-            i.fs.ping()
+            inst.fs.ping()
         except SmbError as e:
             _abort(context, e)
         return common_pb2.PingResponse()
 
     def Read(self, request_iterator, context) -> Iterator[pb.ReadResponse]:  # noqa: N802
-        name = _instance(context)
-        i = self.reg.inputs.get(name)
-        if i is None:
-            context.abort(
-                grpc.StatusCode.FAILED_PRECONDITION, f"smb: input binding {name!r} is not initialised"
-            )
-        yield from ReadLoop(name, i, request_iterator, context, self.shutdown).run()
+        inst = self._get(context)
+        yield from _read_loop(_name(context), inst, request_iterator, context, self.shutdown)
 
 
-class ReadLoop:
-    """Delivers one file at a time and waits for the sidecar's ack before the next."""
+def _read_loop(
+    name: str, inst: Instance, requests, context, shutdown: threading.Event
+) -> Iterator[pb.ReadResponse]:
+    """Deliver one file at a time, and move it only after the sidecar relays the app's answer."""
+    acks: queue.Queue = queue.Queue()
+    closed = threading.Event()
 
-    def __init__(self, name: str, inp: _Input, requests, context, shutdown: threading.Event):
-        self.name = name
-        self.inp = inp
-        self.requests = requests
-        self.context = context
-        self.shutdown = shutdown
-        self.acks: queue.Queue[pb.ReadRequest | None] = queue.Queue()
-        self.closed = threading.Event()
-        self._labels = {"component": name, "target": inp.cfg.target}
-
-    def _reader(self) -> None:
+    def read_acks() -> None:
         try:
-            for req in self.requests:
-                self.acks.put(req)
+            for req in requests:
+                acks.put(req)
         except Exception as e:  # noqa: BLE001
-            log.info("%s: read stream ended: %s", self.name, e)
-        finally:
-            self.closed.set()
-            self.acks.put(None)
+            log.info("%s: read stream ended: %s", name, e)
+        closed.set()
+        acks.put(None)
 
-    def _stopping(self) -> bool:
-        return (
-            self.closed.is_set()
-            or self.shutdown.is_set()
-            or self.inp.stop.is_set()
-            or not self.context.is_active()
-        )
+    threading.Thread(target=read_acks, name=f"acks-{name}", daemon=True).start()
 
-    def run(self) -> Iterator[pb.ReadResponse]:
-        threading.Thread(target=self._reader, name=f"acks-{self.name}", daemon=True).start()
-        self.inp.stream_open = self.inp.stream_ever_opened = True
-        metrics.INPUT_STREAM_UP.labels(**self._labels).set(1)
-        log.info(
-            "%s: read stream open, polling %r every %ss",
-            self.name,
-            self.inp.cfg.read.inbound_path,
-            self.inp.cfg.read.poll_interval,
-        )
-        inbound = self.inp.inbound
+    def stopping() -> bool:
+        return closed.is_set() or shutdown.is_set() or inst.stop.is_set() or not context.is_active()
+
+    def safely(fn):
+        # The sidecar never reopens a stream that ends, so errors here are logged and
+        # retried on the next poll instead of ending it.
         try:
-            backlog: list[Claimed] = self._safe(inbound.recover) or []
-            # Wait a poll interval before the next poll unless the last batch delivered
-            # something. Without this, a claimed file that is still open (returned by every
-            # poll, skipped by every load) would make the loop poll the share flat out.
-            pause = False
-            while not self._stopping():
-                if not backlog:
-                    if pause:
-                        self._sleep(self.inp.cfg.read.poll_interval)
-                        if self._stopping():
-                            break
-                    backlog = self._safe(inbound.poll) or []
-                    pause = True
-                    if not backlog:
-                        continue
-                c = backlog.pop(0)
-                msg = self._safe(lambda c=c: inbound.load(c))
+            return fn()
+        except Exception as e:  # noqa: BLE001
+            log.error("%s: %s", name, e)
+            return None
+
+    inst.stream_open = inst.stream_was_open = True
+    log.info(
+        "%s: read stream open, polling %r every %ss", name, inst.cfg.inbound_path, inst.cfg.poll_interval
+    )
+    try:
+        while not stopping():
+            delivered = False
+            for entry in safely(inst.inbound.poll) or []:
+                msg = safely(lambda e=entry: inst.inbound.load(e))
                 if msg is None:
                     continue
-                pause = False
                 mid = uuid.uuid4().hex
                 yield pb.ReadResponse(
                     data=msg.data, metadata=msg.metadata, content_type=msg.content_type, message_id=mid
                 )
-                ack = self._wait_ack(mid)
+                ack = _wait_ack(acks, mid, stopping)
                 if ack is None:
-                    # Stream closed before the ack: leave the file claimed. It is
-                    # re-delivered when a stream opens again (recover()).
-                    log.warning(
-                        "%s: stream closed before %r was acknowledged; it will be re-delivered",
-                        self.name,
-                        c.path,
-                    )
-                    break
+                    # The file is still in inboundPath and is delivered again later.
+                    log.warning("%s: stream closed before %r was answered", name, msg.name)
+                    return
                 ok = not ack.HasField("response_error")
-                self._safe(
-                    lambda c=c, ok=ok, ack=ack: inbound.complete(c, ok=ok, error=ack.response_error.message)
+                safely(
+                    lambda m=msg, ok=ok, a=ack: inst.inbound.complete(
+                        m.name, ok=ok, error=a.response_error.message
+                    )
                 )
-        finally:
-            self.inp.stream_open = False
-            metrics.INPUT_STREAM_UP.labels(**self._labels).set(0)
-            log.info("%s: read stream closed", self.name)
+                delivered = True
+                if stopping():
+                    return
+            # Poll again straight away after a delivery; otherwise wait. Without the wait,
+            # a file the partner keeps open would make this loop poll the share flat out.
+            if not delivered:
+                _sleep(inst.cfg.poll_interval, stopping)
+    finally:
+        inst.stream_open = False
+        log.info("%s: read stream closed", name)
 
-    def _wait_ack(self, mid: str) -> pb.ReadRequest | None:
-        while True:
-            try:
-                req = self.acks.get(timeout=1.0)
-            except queue.Empty:
-                if self.shutdown.is_set() or not self.context.is_active():
-                    return None
-                continue
-            if req is None:
-                return None
-            if req.message_id == mid:
-                return req
-            log.debug("%s: ignoring ack for unknown message %s", self.name, req.message_id)
 
-    def _sleep(self, seconds: float) -> None:
-        # Wake early on shutdown or when the stream closes.
-        deadline = seconds
-        step = 0.25
-        while deadline > 0 and not self._stopping():
-            self.closed.wait(min(step, deadline))
-            deadline -= step
-
-    def _safe[T](self, fn: Callable[[], T]) -> T | None:
-        """Errors in the poll loop are logged and retried next poll, never fatal to the stream:
-        the sidecar does not reopen a stream that ends."""
+def _wait_ack(acks: queue.Queue, mid: str, stopping: Callable[[], bool]):
+    while True:
         try:
-            return fn()
-        except SmbError as e:
-            log.error("%s: %s", self.name, e)
-        except Exception:
-            log.exception("%s: unexpected error in the poll loop", self.name)
-        self._sleep(self.inp.cfg.read.poll_interval)
-        return None
+            req = acks.get(timeout=1.0)
+        except queue.Empty:
+            if stopping():
+                return None
+            continue
+        if req is None:
+            return None
+        if req.message_id == mid:
+            return req
+
+
+def _sleep(seconds: float, stopping: Callable[[], bool]) -> None:
+    deadline = seconds
+    while deadline > 0 and not stopping():
+        threading.Event().wait(min(0.25, deadline))
+        deadline -= 0.25

@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import argparse
-import json
+import http.server
 import logging
 import os
 import signal
-import socket
 import sys
 import threading
 from concurrent import futures
@@ -15,7 +14,7 @@ from concurrent import futures
 import grpc
 from grpc_reflection.v1alpha import reflection
 
-from . import __version__, metrics
+from . import __version__
 from ._proto import bindings_pb2 as pb
 from ._proto import bindings_pb2_grpc as pb_grpc
 from .config import Config
@@ -25,82 +24,15 @@ from .server import InputService, OutputService, Registry
 log = logging.getLogger("dapr_smb_binding")
 
 # The sidecar reads DAPR_COMPONENTS_SOCKETS_FOLDER; the SDKs have used other
-# spellings. Honour all of them, preferring the sidecar's (see the FTP binding).
+# spellings. Honour all of them, preferring the sidecar's.
 SOCKET_FOLDER_ENVS = (
     "DAPR_COMPONENTS_SOCKETS_FOLDER",
     "DAPR_COMPONENT_SOCKETS_FOLDER",
     "DAPR_COMPONENT_SOCKET_FOLDER",
 )
 DEFAULT_SOCKET_FOLDER = "/tmp/dapr-components-sockets"  # noqa: S108 - the Dapr convention
-
 # 4 MiB of payload plus headroom, matching the sidecar's default body limit.
 DEFAULT_MAX_MESSAGE_SIZE = (4 << 20) + (1 << 20)
-SHUTDOWN_GRACE = 10.0
-
-
-def socket_folder() -> str:
-    for env in SOCKET_FOLDER_ENVS:
-        if os.environ.get(env):
-            return os.environ[env]
-    return DEFAULT_SOCKET_FOLDER
-
-
-def parse_perm(s: str) -> int:
-    """Permission bits, always read as octal ("660" is 0o660, not decimal 660)."""
-    try:
-        n = int(s.removeprefix("0o"), 8)
-    except ValueError:
-        raise argparse.ArgumentTypeError(f'{s!r} is not an octal mode, for example "0660"') from None
-    if n > 0o777:
-        raise argparse.ArgumentTypeError(f"mode {n:#o} is wider than 0777")
-    return n
-
-
-class JsonFormatter(logging.Formatter):
-    _EXTRA = ("component", "target", "operation")
-
-    def format(self, record: logging.LogRecord) -> str:
-        out = {
-            "time": self.formatTime(record, "%Y-%m-%dT%H:%M:%S%z"),
-            "level": record.levelname.lower(),
-            "scope": record.name,
-            "msg": record.getMessage(),
-        }
-        for k in self._EXTRA:
-            if hasattr(record, k):
-                out[k] = getattr(record, k)
-        if record.exc_info:
-            out["error"] = self.formatException(record.exc_info)
-        return json.dumps(out)
-
-
-def setup_logging(level: str, fmt: str) -> None:
-    handler = logging.StreamHandler(sys.stdout)
-    if fmt == "json":
-        handler.setFormatter(JsonFormatter())
-    else:
-        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-    root = logging.getLogger()
-    root.handlers[:] = [handler]
-    lvl = {
-        "debug": logging.DEBUG,
-        "info": logging.INFO,
-        "warn": logging.WARNING,
-        "warning": logging.WARNING,
-        "error": logging.ERROR,
-    }.get(level.lower())
-    root.setLevel(lvl or logging.INFO)
-    # smbprotocol logs every SMB message at INFO.
-    for noisy in ("smbprotocol", "smbclient", "spnego"):
-        logging.getLogger(noisy).setLevel(
-            logging.WARNING if (lvl or logging.INFO) > logging.DEBUG else logging.INFO
-        )
-    if lvl is None:
-        log.warning("unrecognised log level %r, using info", level)
-
-
-def default_instance_id() -> str:
-    return os.environ.get("POD_NAME") or os.environ.get("HOSTNAME") or socket.gethostname()
 
 
 def smb_factory(cfg: Config, name: str) -> FileSystem:
@@ -109,56 +41,56 @@ def smb_factory(cfg: Config, name: str) -> FileSystem:
     return SmbFileSystem(cfg, component=name)
 
 
+def serve_health(port: int, reg: Registry) -> None:
+    """/healthz for a liveness probe: the sidecar never reopens a broken input stream, a restart does."""
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            ok, detail = reg.health() if self.path == "/healthz" else (False, "not found")
+            self.send_response(200 if ok else (503 if self.path == "/healthz" else 404))
+            self.end_headers()
+            self.wfile.write(detail.encode() + b"\n")
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    srv = http.server.ThreadingHTTPServer(("0.0.0.0", port), Handler)  # noqa: S104 - probes reach the pod IP
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="smb-binding", description=__doc__)
     p.add_argument(
-        "--socket-name",
-        default="smb",
-        help="socket file name without .sock; determines spec.type (bindings.<name>)",
+        "--socket-name", default="smb", help="socket file name without .sock; spec.type is bindings.<name>"
     )
-    p.add_argument("--socket-perm", default="0660", type=parse_perm, help="socket permission bits, in octal")
     p.add_argument(
         "--max-message-size",
-        default=DEFAULT_MAX_MESSAGE_SIZE,
         type=int,
-        help="maximum gRPC message in bytes; raise alongside the sidecar's dapr.io/max-body-size",
+        default=DEFAULT_MAX_MESSAGE_SIZE,
+        help="maximum gRPC message in bytes; raise with the sidecar's dapr.io/max-body-size",
     )
-    p.add_argument(
-        "--instance-id",
-        default=default_instance_id(),
-        help="names this replica's processing folder (default: POD_NAME, then HOSTNAME)",
-    )
-    p.add_argument(
-        "--metrics-port", default=0, type=int, help="serve /metrics and /healthz on this port; 0 = off"
-    )
-    p.add_argument("--log-level", default="info", help="debug, info, warn or error")
-    p.add_argument("--log-format", default="text", choices=("text", "json"))
-    p.add_argument("--version", action="store_true", help="print the version and exit")
+    p.add_argument("--health-port", type=int, default=0, help="serve /healthz on this port; 0 = off")
+    p.add_argument("--log-level", default="info", choices=("debug", "info", "warning", "error"))
+    p.add_argument("--version", action="version", version=__version__)
     args = p.parse_args(argv)
 
-    if args.version:
-        print(__version__)
-        return 0
+    logging.basicConfig(
+        level=args.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
+    # smbprotocol logs every SMB message at INFO.
+    for noisy in ("smbprotocol", "smbclient", "spnego"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
-    setup_logging(args.log_level, args.log_format)
-    return run(args)
-
-
-def run(args: argparse.Namespace) -> int:
-    folder = socket_folder()
+    folder = next((os.environ[e] for e in SOCKET_FOLDER_ENVS if os.environ.get(e)), DEFAULT_SOCKET_FOLDER)
     path = os.path.join(folder, f"{args.socket_name}.sock")
-    os.makedirs(folder, mode=0o750, exist_ok=True)
-    try:
-        os.remove(path)  # a socket left by a previous run would make bind fail
-    except FileNotFoundError:
-        pass
+    os.makedirs(folder, exist_ok=True)
+    if os.path.exists(path):
+        os.remove(path)  # left by a previous run
 
     shutdown = threading.Event()
-    reg = Registry(smb_factory, instance_id=args.instance_id, max_message_size=args.max_message_size)
-
+    reg = Registry(smb_factory, max_message_size=args.max_message_size)
     server = grpc.server(
-        # Every open input stream holds a thread for its life, so leave room.
-        futures.ThreadPoolExecutor(max_workers=32, thread_name_prefix="grpc"),
+        futures.ThreadPoolExecutor(max_workers=16),
         options=[
             ("grpc.max_receive_message_length", args.max_message_size),
             ("grpc.max_send_message_length", args.max_message_size),
@@ -166,57 +98,30 @@ def run(args: argparse.Namespace) -> int:
     )
     pb_grpc.add_OutputBindingServicer_to_server(OutputService(reg), server)
     pb_grpc.add_InputBindingServicer_to_server(InputService(reg, shutdown), server)
-    # REQUIRED: the sidecar discovers what a pluggable component implements via
-    # gRPC reflection (v1alpha). Without it the socket appears and the sidecar
-    # still reports "couldn't find binding".
+    # Required: the sidecar discovers the services through gRPC reflection.
+    services = pb.DESCRIPTOR.services_by_name
     reflection.enable_server_reflection(
-        (
-            pb.DESCRIPTOR.services_by_name["OutputBinding"].full_name,
-            pb.DESCRIPTOR.services_by_name["InputBinding"].full_name,
-            reflection.SERVICE_NAME,
-        ),
+        (services["OutputBinding"].full_name, services["InputBinding"].full_name, reflection.SERVICE_NAME),
         server,
     )
-
-    old_umask = os.umask(0o117)  # create the socket as 0660, not briefly wider
+    old_umask = os.umask(0o117)  # the socket is created 0660; the image shares daprd's uid/gid
     try:
         server.add_insecure_port(f"unix://{path}")
         server.start()
     finally:
         os.umask(old_umask)
-    try:
-        os.chmod(path, args.socket_perm)
-    except OSError as e:
-        log.warning("could not set permissions on %s: %s", path, e)
-
-    if args.metrics_port:
-        metrics.serve(args.metrics_port, reg.health)
-        log.info("metrics and /healthz on :%d", args.metrics_port)
-
+    if args.health_port:
+        serve_health(args.health_port, reg)
     log.info(
-        "dapr-smb-binding %s listening on %s (spec.type: bindings.%s, max message size %d bytes, instance %s)",
-        __version__,
-        path,
-        args.socket_name,
-        args.max_message_size,
-        args.instance_id,
+        "dapr-smb-binding %s listening on %s (spec.type bindings.%s)", __version__, path, args.socket_name
     )
 
-    def on_signal(signum, _frame):
-        log.info("received %s, shutting down", signal.Signals(signum).name)
-        shutdown.set()
-
-    signal.signal(signal.SIGTERM, on_signal)
-    signal.signal(signal.SIGINT, on_signal)
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, lambda *_: shutdown.set())
     shutdown.wait()
-
-    server.stop(SHUTDOWN_GRACE).wait()
+    log.info("shutting down")
+    server.stop(10).wait()
     reg.close_all()
-    try:
-        os.remove(path)
-    except FileNotFoundError:
-        pass
-    log.info("shutdown complete")
     return 0
 
 

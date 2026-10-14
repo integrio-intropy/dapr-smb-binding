@@ -57,7 +57,7 @@ services:
     build:
       context: ../..
     profiles: [dapr]
-    command: ["--log-level", "debug", "--instance-id", "e2e", "--metrics-port", "9464"]
+    command: ["--log-level", "debug", "--health-port", "9464"]
     depends_on:
       dc:
         condition: service_healthy

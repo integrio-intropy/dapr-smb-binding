@@ -25,11 +25,13 @@ make integration-down
 
 ## Rules that keep the guarantees
 
-- **Never fall back to NTLM.** Kerberos modes pass `auth_protocol="kerberos"`
+- **Never fall back to NTLM.** Every smbclient call passes `auth_protocol="kerberos"`
   on every smbclient call, not just `register_session`: smbclient opens a new
   session with its default (`negotiate`) if a call arrives without one.
-- **Never overwrite by accident.** Use `fs.rename` (refuses) unless the
-  configuration says `overwrite`.
+- **Never overwrite.** `rename` refuses an existing target; keep it that way
+  until `onTargetExists` (a reserved extension) is implemented.
+- **Start small.** Add a reserved extension from CONTRACT.md when a partner or
+  an incident needs it, under the name the contract gives it.
 - The contract in CONTRACT.md is shared with the FTP and SFTP bindings. A
   change to it is a change to all of them.
 

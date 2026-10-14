@@ -1,36 +1,21 @@
-"""Output binding operations.
+"""Output binding operations: create, get, list and delete as in Dapr's SFTP binding, plus rename.
 
-create, get, list and delete behave like Dapr's SFTP binding (same request
-metadata, same response shapes); rename and the completion settings are
-extensions. See CONTRACT.md.
+create never lets a partner see a half-written file: it writes a temp name with
+no sharing, then renames it to the final name. SMB rename is atomic and refuses
+to overwrite, so an existing file is never replaced.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import time
 from dataclasses import dataclass, field
 
-from . import metrics
-from .completion import Writer, move
-from .config import Config, OnTargetExists, _enum, normalize_path
+from .config import Config
 from .errors import Kind, SmbError
 from .fs import FileSystem, join, split
 
 log = logging.getLogger(__name__)
-
-# Request metadata keys. fileName and rootPath are the SFTP binding's.
-MD_FILE_NAME = "fileName"
-MD_ROOT_PATH = "rootPath"
-MD_NEW_FILE_NAME = "newFileName"
-MD_ON_TARGET_EXISTS = "onTargetExists"
-# Response metadata keys (extensions).
-MD_FILE_PATH = "filePath"
-MD_SIZE = "size"
-
-CT_JSON = "application/json"
-CT_BINARY = "application/octet-stream"
 
 OPERATIONS = ("create", "get", "list", "delete", "rename")
 
@@ -42,119 +27,62 @@ class Response:
     content_type: str = ""
 
 
-def _md(md: dict[str, str], key: str) -> str:
-    # Case-insensitive, as Dapr's GetMetadataProperty is.
-    low = key.lower()
-    for k, v in md.items():
-        if k.lower() == low:
-            return v
-    return ""
-
-
 class OutputBinding:
-    def __init__(self, cfg: Config, fs: FileSystem, *, component: str = "default"):
+    def __init__(self, cfg: Config, fs: FileSystem):
         self.cfg = cfg
         self.fs = fs
-        self.component = component
-        self._labels = {"component": component, "target": cfg.target}
-        self.writer = Writer(fs, cfg.write, labels=self._labels)
 
     def invoke(self, operation: str, data: bytes, md: dict[str, str]) -> Response:
-        handler = {
-            "create": self._create,
-            "get": self._get,
-            "list": self._list,
-            "delete": self._delete,
-            "rename": self._rename,
-        }.get(operation)
+        md = {k.lower(): v for k, v in md.items()}  # case-insensitive, as in Dapr
+        handler = getattr(self, f"_{operation}", None) if operation in OPERATIONS else None
         if handler is None:
             raise SmbError(
-                Kind.CONFIG,
-                f'unsupported operation "{operation}"; this binding supports {", ".join(OPERATIONS)}',
+                Kind.INVALID, f'unsupported operation "{operation}"; supported: {", ".join(OPERATIONS)}'
             )
-        start = time.monotonic()
-        result = "error"
-        try:
-            resp = handler(data, md)
-            result = "ok"
-            return resp
-        except SmbError as e:
-            result = e.kind.value
-            raise
-        finally:
-            metrics.OPERATIONS.labels(**self._labels, operation=operation, result=result).inc()
-            metrics.OPERATION_SECONDS.labels(**self._labels, operation=operation).observe(
-                time.monotonic() - start
-            )
+        return handler(data, md)
 
-    # ------------------------------------------------------------------ paths
-
-    def _root(self, md: dict[str, str]) -> str:
-        # The SFTP binding lets a request override rootPath.
-        r = _md(md, MD_ROOT_PATH)
-        return normalize_path(r) if r else self.cfg.root_path
-
-    def _resolve(self, op: str, md: dict[str, str], *, allow_root: bool = False) -> tuple[str, str]:
-        """Returns (root, path). Joined, not confined: the share's permissions decide what is reachable."""
-        root = self._root(md)
-        name = _md(md, MD_FILE_NAME)
+    def _path(self, md: dict[str, str], key: str = "filename") -> str:
+        name = md.get(key, "")
         if not name:
-            if not allow_root:
-                raise SmbError(
-                    Kind.CONFIG, "required metadata fileName is missing", op=op, target=self.cfg.target
-                )
-            return root, root
-        return root, join(root, name)
+            raise SmbError(
+                Kind.INVALID,
+                f"required metadata {'fileName' if key == 'filename' else 'newFileName'} is missing",
+            )
+        return join(self.cfg.root_path, name)
 
-    @staticmethod
-    def _relative(root: str, path: str) -> str:
-        if root and path.startswith(root + "/"):
-            return path[len(root) + 1 :]
-        return path
-
-    def _policy(self, md: dict[str, str]) -> OnTargetExists | None:
-        v = _md(md, MD_ON_TARGET_EXISTS)
-        if not v:
-            return None
-        try:
-            return _enum(OnTargetExists, "onTargetExists", v, OnTargetExists.FAIL)
-        except ValueError as e:
-            raise SmbError(Kind.CONFIG, str(e)) from e
-
-    # ------------------------------------------------------------------ operations
+    def _named(self, path: str) -> Response:
+        # fileName relative to rootPath, as the SFTP binding returns it; the full path as an extension.
+        rel = path.removeprefix(self.cfg.root_path + "/") if self.cfg.root_path else path
+        return Response(
+            json.dumps({"fileName": rel}).encode(), {"fileName": rel, "filePath": path}, "application/json"
+        )
 
     def _create(self, data: bytes, md: dict[str, str]) -> Response:
-        root, path = self._resolve("create", md)
-        final = self.writer.create(path, data, self._policy(md))
-        rel = self._relative(root, final)
-        log.info(
-            "created %r (%d bytes)",
-            final,
-            len(data),
-            extra={"component": self.component, "target": self.cfg.target, "operation": "create"},
-        )
-        return Response(
-            data=json.dumps({"fileName": rel}).encode(),
-            metadata={MD_FILE_NAME: rel, MD_FILE_PATH: final},
-            content_type=CT_JSON,
-        )
+        path = self._path(md)
+        folder, name = split(path)
+        tmp = join(folder, self.cfg.temp_file_name_pattern.replace("{name}", name))
+        self.fs.makedirs(folder)  # like the SFTP binding
+        self.fs.write_new(tmp, data)
+        try:
+            self.fs.rename(tmp, path)
+        except BaseException:
+            try:
+                self.fs.remove(tmp)
+            except SmbError as e:
+                log.warning("could not remove temp file %r: %s", tmp, e)
+            raise
+        log.info("created %r (%d bytes)", path, len(data))
+        return self._named(path)
 
     def _get(self, _data: bytes, md: dict[str, str]) -> Response:
-        root, path = self._resolve("get", md)
+        path = self._path(md)
         content = self.fs.read(path)
         return Response(
-            data=content,
-            metadata={
-                MD_FILE_NAME: self._relative(root, path),
-                MD_FILE_PATH: path,
-                MD_SIZE: str(len(content)),
-            },
-            content_type=CT_BINARY,
+            content, {"fileName": md["filename"], "size": str(len(content))}, "application/octet-stream"
         )
 
     def _list(self, _data: bytes, md: dict[str, str]) -> Response:
-        _, path = self._resolve("list", md, allow_root=True)
-        entries = self.fs.listdir(path)
+        path = join(self.cfg.root_path, md.get("filename", ""))
         body = [
             {
                 "fileName": e.name,
@@ -162,26 +90,16 @@ class OutputBinding:
                 "size": e.size,
                 "modTime": e.mtime.isoformat().replace("+00:00", "Z"),
             }
-            for e in entries
+            for e in self.fs.listdir(path)
         ]
-        return Response(data=json.dumps(body).encode(), metadata={MD_FILE_NAME: path}, content_type=CT_JSON)
+        return Response(json.dumps(body).encode(), {}, "application/json")
 
     def _delete(self, _data: bytes, md: dict[str, str]) -> Response:
-        _, path = self._resolve("delete", md)
-        self.fs.remove(path)
+        self.fs.remove(self._path(md))
         return Response()
 
     def _rename(self, _data: bytes, md: dict[str, str]) -> Response:
-        root, src = self._resolve("rename", md)
-        new = _md(md, MD_NEW_FILE_NAME)
-        if not new:
-            raise SmbError(Kind.CONFIG, "required metadata newFileName is missing", op="rename", path=src)
-        dst = join(root, new)
+        src, dst = self._path(md), self._path(md, "newfilename")
         self.fs.makedirs(split(dst)[0])
-        final = move(self.fs, src, dst, self._policy(md) or self.cfg.write.on_target_exists)
-        rel = self._relative(root, final)
-        return Response(
-            data=json.dumps({"fileName": rel}).encode(),
-            metadata={MD_FILE_NAME: rel, MD_FILE_PATH: final},
-            content_type=CT_JSON,
-        )
+        self.fs.rename(src, dst)
+        return self._named(dst)

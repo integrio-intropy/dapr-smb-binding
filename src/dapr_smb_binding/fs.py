@@ -1,8 +1,7 @@
-"""The file-system operations the binding needs, independent of SMB.
+"""The file operations the binding needs, independent of SMB.
 
-Paths are share-relative with forward slashes. Implementations raise
-:class:`~dapr_smb_binding.errors.SmbError` with a :class:`~dapr_smb_binding.errors.Kind`
-so the binding logic can be tested against :mod:`dapr_smb_binding.localfs`.
+Paths are share-relative with forward slashes. Implementations raise SmbError,
+so the binding logic can be tested against a local-directory fake.
 """
 
 from __future__ import annotations
@@ -21,49 +20,30 @@ class Entry:
 
 
 class FileSystem(Protocol):
-    def listdir(self, path: str) -> list[Entry]:
-        """List a directory. Never includes "." or ".."."""
-
-    def stat(self, path: str) -> Entry: ...
+    def listdir(self, path: str) -> list[Entry]: ...
 
     def read(self, path: str, *, exclusive: bool = False) -> bytes:
-        """Read a whole file. exclusive=True denies all sharing while open, so it
-        fails with SHARING_VIOLATION if anyone else has the file open."""
+        """exclusive=True denies all sharing: SHARING_VIOLATION if anyone else has the file open."""
 
-    def write(self, path: str, data: bytes, *, exclusive_create: bool) -> None:
-        """Write a whole file. exclusive_create=True fails with EXISTS if the file
-        exists, and denies sharing while writing; False truncates or creates."""
+    def write_new(self, path: str, data: bytes) -> None:
+        """Create a file that must not exist yet (EXISTS otherwise), with no sharing while writing."""
 
     def rename(self, src: str, dst: str) -> None:
-        """Atomic rename that refuses to overwrite (EXISTS)."""
-
-    def replace(self, src: str, dst: str) -> None:
-        """Atomic rename that overwrites an existing target."""
+        """Atomic; refuses to overwrite (EXISTS)."""
 
     def remove(self, path: str) -> None: ...
 
-    def makedirs(self, path: str) -> None:
-        """Create a directory and its parents; no error if it exists."""
+    def makedirs(self, path: str) -> None: ...
 
-    def rmdir(self, path: str) -> None:
-        """Remove an empty directory."""
-
-    def ping(self) -> None:
-        """Verify the session and tree connect are usable."""
+    def ping(self) -> None: ...
 
     def close(self) -> None: ...
 
 
 def join(*parts: str) -> str:
-    out: list[str] = []
-    for p in parts:
-        out.extend(x for x in p.replace("\\", "/").split("/") if x and x != ".")
-    return "/".join(out)
+    return "/".join(x for p in parts for x in p.replace("\\", "/").split("/") if x and x != ".")
 
 
 def split(path: str) -> tuple[str, str]:
-    """Split into (directory, name)."""
-    if "/" in path:
-        d, n = path.rsplit("/", 1)
-        return d, n
-    return "", path
+    d, _, n = path.rpartition("/")
+    return d, n

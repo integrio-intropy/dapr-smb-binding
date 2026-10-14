@@ -140,7 +140,7 @@ def test_output_through_daprd(app, share):
 def test_input_through_daprd(app, share):
     received, reject = app
     wait_ready(app)
-    share.write("e2e/in/order.xml", b"<order/>", exclusive_create=True)
+    share.write_new("e2e/in/order.xml", b"<order/>")
 
     path, headers, body = received.get(timeout=60)
     assert path == "/smb"
@@ -151,7 +151,7 @@ def test_input_through_daprd(app, share):
 
     # The app rejects: the file goes to error/.
     reject.set()
-    share.write("e2e/in/bad.xml", b"<bad/>", exclusive_create=True)
+    share.write_new("e2e/in/bad.xml", b"<bad/>")
     received.get(timeout=60)
     eventually(lambda: names_in(share, "e2e/in/error"), ["bad.xml"])
     assert names_in(share, "e2e/in") == []

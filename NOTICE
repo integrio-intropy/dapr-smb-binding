@@ -15,7 +15,6 @@ The container image bundles these Python packages and their dependencies:
   krb5 (pykrb5)    MIT          Copyright (c) Jordan Borean
   cryptography     Apache-2.0 OR BSD-3-Clause
   grpcio, grpcio-reflection, protobuf   Apache-2.0 / BSD-3-Clause
-  prometheus-client                     Apache-2.0
 
 and the MIT Kerberos libraries (MIT licence) from Debian.
 

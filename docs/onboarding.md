@@ -36,9 +36,7 @@ binding already forces Kerberos over TCP).
       server and is not in a "Deny access…" policy.
 - [ ] Share and NTFS permissions: **Modify** on the exchange folders —
       create, write, rename and delete, in both source and target folders,
-      including the `processing`, `processed` and `error` subfolders the
-      binding creates (each replica also keeps a small `.heartbeat` file in
-      its `processing/<pod>/` folder).
+      including the `processed` and `error` subfolders the binding creates.
 - [ ] Password rotation is agreed (in keytab mode a new keytab after every
       change), and the account lockout threshold is known.
 - [ ] A direct `\\server\share` path, not DFS (or DFS is included in testing).
@@ -64,24 +62,18 @@ process. Store `base64 -w0 svc-intropy.keytab` in the secret.
 
 ## 3. Agree the completion convention with the partner
 
-The binding's defaults work when the partner does **either** of these:
+The binding works when the partner does **either** of these:
 
-| Partner writes by… | Configure |
+| Partner writes by… | Works? |
 |---|---|
-| Writing a temp name and renaming (most tools, BizTalk "use temporary file") | nothing |
-| Writing in place, keeping the file open until done (normal Windows apps) | nothing: the claim fails with a sharing violation until they close |
-| Writing in place in several opens, or from a non-Windows client | `requireMarkerPattern: "{name}.done"` if they can write a marker, else `stableFor: 30s` |
+| Writing a temp name and renaming (most tools, BizTalk "use temporary file") | yes; add their temp names to `ignorePatterns` |
+| Writing in place, keeping the file open until done (normal Windows apps) | yes: the file is skipped while they hold it open |
+| Writing in place in several separate opens, or from a non-Windows client | **no**: ask them to write a temp name and rename. (Markers and stability checks are reserved extensions, see CONTRACT.md.) |
 
-For files we write:
-
-| Partner picks up… | Configure |
-|---|---|
-| A specific pattern, e.g. `*.xml` | nothing: we write `name.xml.tmp` and rename |
-| Everything (`*`) | `tempFileMode: folder` |
-| Only after a marker | `completionMarkerPattern: "{name}.done"` |
-
-Agree also what happens when a file of the same name already exists
-(`onTargetExists`: `fail` by default) and who cleans up `processed/`.
+For files we write: we write `name.tmp` and rename it to `name`. The partner
+must not pick up `*.tmp`; if their pattern is `*`, set `tempFileNamePattern` to
+a name they ignore. An existing file is never overwritten; agree what should
+happen when a name is reused.
 
 ## 4. Configure and verify
 
@@ -102,8 +94,7 @@ Agree also what happens when a file of the same name already exists
 | `Clock skew too great` | Node clock and DC differ by more than 5 minutes. |
 | `Cannot contact any KDC` | TCP 88 blocked, or wrong `kdcs`. |
 | `Preauthentication failed` | Wrong password or stale keytab. |
-| `0xC0000418` (NTLM blocked) | `authMode: ntlm` against a server that refuses NTLM. Use Kerberos. |
 | `0xC00000CC` (bad network name) | The share does not exist. |
 | `0xC0000022` (access denied) | Share or NTFS permissions. |
 | `0xC0000043` (sharing violation) on `get`/`delete` | Someone has the file open. Inbound polling handles this by itself. |
-| `0xC0000035` (name collision) | The target exists and `onTargetExists` is `fail`. |
+| `0xC0000035` (name collision) | The target exists; `create` and `rename` never overwrite. A leftover `name.tmp` from a crash causes this too. |

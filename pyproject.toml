@@ -16,7 +16,6 @@ dependencies = [
   "grpcio>=1.84,<2",
   "grpcio-reflection>=1.84,<2",
   "protobuf>=7.35.1,<8",
-  "prometheus-client>=0.21,<1",
 ]
 
 [project.optional-dependencies]
