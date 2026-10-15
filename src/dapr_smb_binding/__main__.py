@@ -76,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
         "--exit-when-idle",
         type=duration,
         default=0.0,
-        help="exit once the sidecar has connected and then been gone this long, e.g. 30s; for Jobs, "
+        help="exit once the sidecar has been up and then gone this long, e.g. 30s; for Jobs, "
         "leave off for Deployments",
     )
     p.add_argument("--log-level", default="info", choices=("debug", "info", "warning", "error"))
@@ -122,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.health_port:
         serve_health(args.health_port, reg)
     if args.exit_when_idle:
-        threading.Thread(target=idle.watch, args=(path, args.exit_when_idle, shutdown), daemon=True).start()
+        threading.Thread(target=idle.watch, args=(args.exit_when_idle, shutdown), daemon=True).start()
     log.info(
         "dapr-smb-binding %s listening on %s (spec.type bindings.%s)", __version__, path, args.socket_name
     )

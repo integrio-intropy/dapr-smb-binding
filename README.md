@@ -135,7 +135,7 @@ so without it a Job would never finish. Use a separate Component for Jobs; see
 | `--socket-name` | `smb` | Socket file name; `spec.type` is `bindings.<name>`. |
 | `--max-message-size` | `5242880` | Raise with the sidecar's `dapr.io/max-body-size`. |
 | `--health-port` | `0` (off) | Serve `/healthz`. |
-| `--exit-when-idle` | off | Exit once the sidecar has connected and then been gone this long, e.g. `30s`. For Jobs and CronJobs; leave off for Deployments. |
+| `--exit-when-idle` | off | Exit once the sidecar has been up and then gone this long, e.g. `30s`. For Jobs and CronJobs; leave off for Deployments. |
 | `--log-level` | `info` | `debug`, `info`, `warning`, `error`. |
 
 ## Development

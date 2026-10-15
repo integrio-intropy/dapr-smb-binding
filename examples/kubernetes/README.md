@@ -38,12 +38,14 @@ Let the binding exit when the sidecar does, with this in the
 "args": ["--health-port", "9464", "--exit-when-idle", "30s"]
 ```
 
-It watches the sidecar's connection to the binding's socket (Linux lists it in
-`/proc/net/unix`, and every container in a pod shares the network namespace).
-Once the sidecar has connected and then been gone for 30 s, the binding shuts
-down cleanly and exits with 0. The timer only starts after the first
-connection, and any reconnect resets it, so a slow sidecar start or component
-discovery does not trip it.
+It watches the sidecar's HTTP port on `localhost` (3500, or `DAPR_HTTP_PORT`),
+which every container in a pod shares and which daprd listens on for as long
+as it runs. Once the sidecar has been up and then gone for 30 s, the binding
+shuts down cleanly and exits with 0. The timer only starts once the sidecar
+has been seen, and a restart within the timeout resets it.
+
+(Not the sidecar's connection to the binding's socket: daprd closes that after
+30 minutes without calls while it keeps running.)
 
 Give Jobs a **separate Component** from the one your Deployments use, scoped to
 the Jobs' app-ids. The flag lives on the container, so every pod that injects
