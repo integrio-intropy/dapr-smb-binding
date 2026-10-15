@@ -23,8 +23,9 @@ from .server import InputService, OutputService, Registry
 
 log = logging.getLogger("dapr_smb_binding")
 
-# The folder the sidecar scans for component sockets.
-SOCKET_FOLDER_ENV = "DAPR_COMPONENTS_SOCKETS_FOLDER"
+# The folder the sidecar scans for component sockets, as the injector passes it
+# to component containers.
+SOCKET_FOLDER_ENV = "DAPR_COMPONENT_SOCKETS_FOLDER"
 DEFAULT_SOCKET_FOLDER = "/tmp/dapr-components-sockets"  # noqa: S108 - the Dapr convention
 # 4 MiB of payload plus headroom, matching the sidecar's default body limit.
 DEFAULT_MAX_MESSAGE_SIZE = (4 << 20) + (1 << 20)

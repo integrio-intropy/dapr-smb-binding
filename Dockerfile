@@ -69,9 +69,10 @@ RUN pip install --no-cache-dir --no-compile /wheels/*.whl \
 
 COPY LICENSE NOTICE /usr/local/share/doc/dapr-smb-binding/
 
-USER app
+# Numeric, so Kubernetes can verify runAsNonRoot.
+USER 65532:65532
 
-ENV DAPR_COMPONENTS_SOCKETS_FOLDER=/tmp/dapr-components-sockets \
+ENV DAPR_COMPONENT_SOCKETS_FOLDER=/tmp/dapr-components-sockets \
     SMB_BINDING_RUNTIME_DIR=/tmp/dapr-smb-binding \
     KRB5CCNAME=MEMORY:dapr-smb-binding \
     PYTHONUNBUFFERED=1 \

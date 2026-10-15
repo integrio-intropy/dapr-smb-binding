@@ -21,6 +21,17 @@
    kubectl logs deploy/file-adapter -c daprd | grep -i smb
    ```
 
+## Startup order: daprd restarts once
+
+daprd looks for component sockets once, about 20 ms after it starts, and the
+injector starts this binding after daprd. The binding takes a few hundred
+milliseconds to listen, so daprd exits with `couldn't find binding` and is
+restarted in the same pod; by then the binding is listening. A Deployment
+(`restartPolicy: Always`) recovers by itself. A Job needs
+`restartPolicy: OnFailure` and room for the restart in `backoffLimit` (5 is
+enough; with several binding instances starting at once daprd may need two
+restarts). With `restartPolicy: Never` the Job fails.
+
 The app receives inbound files as `POST /partner-share` (the component name)
 and must answer 2xx to have the file moved to `processed/`.
 
@@ -31,7 +42,9 @@ injector adds this binding to `spec.containers`. So when a Job's app finishes
 and shuts the sidecar down, the binding keeps running and the Job never
 completes.
 
-Let the binding exit when the sidecar does, with this in the
+Run the Job with `restartPolicy: OnFailure` and `backoffLimit: 5` (see
+[Startup order](#startup-order-daprd-restarts-once)), and let the binding exit
+when the sidecar does, with this in the
 `dapr.io/component-container` annotation:
 
 ```json
