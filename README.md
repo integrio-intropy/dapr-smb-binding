@@ -127,7 +127,10 @@ input stream has closed, which the sidecar never reopens by itself.
 
 **Jobs and CronJobs** need `--exit-when-idle`. A pod only completes once every
 container has stopped, and Dapr injects this binding as an ordinary container,
-so without it a Job would never finish. Use a separate Component for Jobs; see
+so without it a Job would never finish. Jobs also need `restartPolicy: OnFailure`:
+daprd looks for component sockets once, before the injected binding is
+listening, and exits; the restart in the same pod finds it. Use a separate
+Component for Jobs; see
 [examples/kubernetes](examples/kubernetes/README.md#jobs-and-cronjobs).
 
 | Flag | Default | |

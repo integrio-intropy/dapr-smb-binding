@@ -5,14 +5,14 @@ metadata:
   annotations:
     # Dapr injects this container into pods that set
     # dapr.io/inject-pluggable-components: "true". The pod must also define the
-    # smb-binding-runtime volume (see deployment.yaml).
+    # smb-binding-runtime volume (see deployment.yaml). The injector mounts the
+    # components socket folder itself.
     dapr.io/component-container: >
       {
         "name": "smb-binding",
         "image": "harbor.intropy.io/platform/dapr-smb-binding:0.1.0",
         "args": ["--health-port", "9464"],
         "volumeMounts": [
-          { "name": "dapr-unix-domain-socket", "mountPath": "/tmp/dapr-components-sockets" },
           { "name": "smb-binding-runtime", "mountPath": "/tmp/dapr-smb-binding" }
         ],
         "livenessProbe": {
