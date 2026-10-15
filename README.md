@@ -112,9 +112,9 @@ Each of these is a known extension, to add when it is needed:
 - **Files are single messages** (4 MiB by default). Raise `--max-message-size`
   with the sidecar's `dapr.io/max-body-size`; inbound files over the limit go to
   `errorFolder`.
-- **No overwrite, unique names, markers, stability checks or stale temp
-  cleanup.** A crash between write and rename leaves `name.tmp`, which makes the
-  next `create` of that name fail with "exists" until it is removed.
+- **No overwrite, unique names, markers, stability checks or temp file
+  cleanup.** A crash between write and rename leaves `name.tmp` behind until
+  the next `create` of that name overwrites it.
 - **Not yet validated against Windows Server and real AD.**
 
 ## Running it

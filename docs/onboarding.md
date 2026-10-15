@@ -97,4 +97,4 @@ happen when a name is reused.
 | `0xC00000CC` (bad network name) | The share does not exist. |
 | `0xC0000022` (access denied) | Share or NTFS permissions. |
 | `0xC0000043` (sharing violation) on `get`/`delete` | Someone has the file open. Inbound polling handles this by itself. |
-| `0xC0000035` (name collision) | The target exists; `create` and `rename` never overwrite. A leftover `name.tmp` from a crash causes this too. |
+| `0xC0000035` (name collision) | The target exists; `create` and `rename` never overwrite. |

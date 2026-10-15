@@ -171,11 +171,11 @@ class SmbFileSystem:
 
         return self._call("get", path, fn)
 
-    def create(self, path: str, data: bytes) -> None:
+    def write(self, path: str, data: bytes) -> None:
         import smbclient
 
         def fn() -> None:
-            with smbclient.open_file(self._unc(path), mode="xb", share_access=None, **self._kw) as f:
+            with smbclient.open_file(self._unc(path), mode="wb", share_access=None, **self._kw) as f:
                 f.write(data)
 
         self._call("create", path, fn)

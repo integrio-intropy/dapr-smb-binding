@@ -30,7 +30,7 @@ permissions decide what the account can reach.
 
 | Field | Default | Meaning |
 |---|---|---|
-| `tempFileNamePattern` | `{name}.tmp` | `create` writes this name, then renames it to the final one. Never overwrites an existing file. |
+| `tempFileNamePattern` | `{name}.tmp` | `create` writes this name, then renames it to the final one. Never overwrites an existing final file; a temp file left over from a crash is overwritten. |
 | `inboundPath` | `rootPath` | Folder the input binding polls. |
 | `filePattern` | `*` | Comma-separated globs to pick up. |
 | `ignorePatterns` | | Comma-separated globs never picked up. Our own temp pattern is always ignored. |

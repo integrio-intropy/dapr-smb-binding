@@ -2,7 +2,8 @@
 
 create never lets a partner see a half-written file: it writes a temp name with
 no sharing, then renames it to the final name. SMB rename is atomic and refuses
-to overwrite, so an existing file is never replaced.
+to overwrite, so an existing file is never replaced. A temp file left over from
+a crash is overwritten; one another writer has open is refused by the server.
 """
 
 from __future__ import annotations
@@ -62,7 +63,7 @@ class OutputBinding:
         folder, name = split(path)
         tmp = join(folder, self.cfg.temp_file_name_pattern.replace("{name}", name))
         self.fs.makedirs(folder)  # like the SFTP binding
-        self.fs.create(tmp, data)
+        self.fs.write(tmp, data)
         try:
             self.fs.rename(tmp, path)
         except BaseException:

@@ -64,11 +64,10 @@ class LocalFS:
             raise self._missing(path)
         return self._p(path).read_bytes()
 
-    def create(self, path: str, data: bytes) -> None:
+    def write(self, path: str, data: bytes) -> None:
         self._hook("write", path)
+        self._check_open(path)
         p = self._p(path)
-        if p.exists():
-            raise SmbError(Kind.EXISTS, "exists", status=STATUS_OBJECT_NAME_COLLISION)
         if not p.parent.is_dir():
             raise self._missing(path)
         p.write_bytes(data)

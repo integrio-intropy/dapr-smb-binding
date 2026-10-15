@@ -130,6 +130,26 @@ def test_output_operations(fs, base):
     b.invoke("delete", b"", {"fileName": "archive/a.xml"})
 
 
+def test_leftover_temp_file_is_overwritten(fs, base, partner):
+    with partner("out/a.xml.tmp") as f:
+        f.write(b"partial, left by a crash")
+    b = OutputBinding(config(base), fs)
+    b.invoke("create", b"complete", {"fileName": "a.xml"})
+    assert b.invoke("get", b"", {"fileName": "a.xml"}).data == b"complete"
+    assert [e.name for e in fs.listdir(f"{base}/out")] == ["a.xml"]
+
+
+def test_temp_file_another_writer_has_open_is_refused(fs, base, partner):
+    b = OutputBinding(config(base), fs)
+    with partner("out/a.xml.tmp") as f:
+        f.write(b"theirs, still being written")
+        f.flush()
+        with pytest.raises(SmbError) as e:
+            b.invoke("create", b"ours", {"fileName": "a.xml"})
+        assert e.value.kind is Kind.SHARING_VIOLATION
+    assert [e.name for e in fs.listdir(f"{base}/out")] == ["a.xml.tmp"]  # theirs, untouched
+
+
 def test_eight_mib_roundtrip(fs, base):
     b = OutputBinding(config(base), fs)
     data = os.urandom(8 << 20)
