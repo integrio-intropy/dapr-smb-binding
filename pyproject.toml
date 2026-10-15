@@ -45,8 +45,7 @@ markers = ["integration: needs the Samba AD DC from tests/integration (make inte
 [tool.ruff]
 line-length = 110
 target-version = "py312"
-# poc/ is kept verbatim as the evidence the design was validated with.
-extend-exclude = ["src/dapr_smb_binding/_proto", "poc"]
+extend-exclude = ["src/dapr_smb_binding/_proto"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "S", "SIM"]

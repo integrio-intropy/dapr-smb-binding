@@ -1,7 +1,7 @@
 """Against a real Samba AD DC with NTLM disabled and encryption required.
 
-The PoC cases (poc/smb_poc.py, poc/renew_test.py) as automated tests. Run
-with `make integration`.
+Covers the cases the design was validated with in INTROPY-263. Run with
+`make integration`.
 """
 
 from __future__ import annotations

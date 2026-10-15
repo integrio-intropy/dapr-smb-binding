@@ -115,8 +115,7 @@ Each of these is a known extension, to add when it is needed:
 - **No overwrite, unique names, markers, stability checks or stale temp
   cleanup.** A crash between write and rename leaves `name.tmp`, which makes the
   next `create` of that name fail with "exists" until it is removed.
-- **Not yet validated against Windows Server and real AD;** see
-  [poc/README.md](poc/README.md).
+- **Not yet validated against Windows Server and real AD.**
 
 ## Running it
 
