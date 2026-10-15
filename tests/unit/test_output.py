@@ -62,11 +62,21 @@ def test_create_never_overwrites_and_cleans_up(lfs):
     assert (lfs.root / "out/a.xml").read_bytes() == b"old"
 
 
-def test_leftover_temp_blocks_with_exists(lfs):
-    lfs.put("out/a.xml.tmp", b"partial")
+def test_leftover_temp_is_overwritten(lfs):
+    lfs.put("out/a.xml.tmp", b"partial, from a crash")
+    binding(lfs).invoke("create", b"complete", {"fileName": "a.xml"})
+    assert lfs.files() == ["out/a.xml"]
+    assert (lfs.root / "out/a.xml").read_bytes() == b"complete"
+
+
+def test_temp_another_writer_has_open_is_left_alone(lfs):
+    lfs.put("out/a.xml.tmp", b"someone else's, still being written")
+    lfs.open_by_partner.add("out/a.xml.tmp")
     with pytest.raises(SmbError) as e:
         binding(lfs).invoke("create", b"x", {"fileName": "a.xml"})
-    assert e.value.kind is Kind.EXISTS
+    assert e.value.kind is Kind.SHARING_VIOLATION
+    assert lfs.files() == ["out/a.xml.tmp"]
+    assert (lfs.root / "out/a.xml.tmp").read_bytes() == b"someone else's, still being written"
 
 
 def test_rename_never_overwrites(lfs):
