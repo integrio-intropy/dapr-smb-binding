@@ -1,0 +1,64 @@
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: partner-share
+  annotations:
+    # Dapr injects this container into pods that set
+    # dapr.io/inject-pluggable-components: "true". The pod must also define the
+    # smb-binding-runtime volume (see deployment.yaml).
+    dapr.io/component-container: >
+      {
+        "name": "smb-binding",
+        "image": "harbor.intropy.io/platform/dapr-smb-binding:0.1.0",
+        "args": ["--health-port", "9464"],
+        "volumeMounts": [
+          { "name": "dapr-unix-domain-socket", "mountPath": "/tmp/dapr-components-sockets" },
+          { "name": "smb-binding-runtime", "mountPath": "/tmp/dapr-smb-binding" }
+        ],
+        "livenessProbe": {
+          "httpGet": { "path": "/healthz", "port": 9464 },
+          "periodSeconds": 15,
+          "failureThreshold": 3
+        },
+        "resources": {
+          "requests": { "cpu": "20m", "memory": "64Mi" },
+          "limits": { "memory": "256Mi" }
+        },
+        "securityContext": {
+          "runAsNonRoot": true,
+          "allowPrivilegeEscalation": false,
+          "readOnlyRootFilesystem": true,
+          "capabilities": { "drop": ["ALL"] },
+          "seccompProfile": { "type": "RuntimeDefault" }
+        }
+      }
+spec:
+  type: bindings.smb
+  version: v1
+  metadata:
+    # --- connection: SFTP-compatible names, plus SMB/Kerberos specifics
+    - name: address
+      value: fs01.corp.example.com
+    - name: share
+      value: exchange
+    - name: rootPath
+      value: in/from-intropy
+    - name: username
+      value: svc-intropy@CORP.EXAMPLE.COM
+    - name: password
+      secretKeyRef: { name: partner-smb, key: password }
+    # Keytab mode instead of a password:
+    # - name: authMode
+    #   value: kerberos-keytab
+    # - name: keytab
+    #   secretKeyRef: { name: partner-smb, key: keytab }   # base64 of the keytab file
+    - name: kdcs
+      value: dc1.corp.example.com,dc2.corp.example.com
+
+    # --- inbound (partner writes, we read)
+    - name: inboundPath
+      value: out/to-intropy
+    - name: filePattern
+      value: "*.xml"
+auth:
+  secretStore: kubernetes

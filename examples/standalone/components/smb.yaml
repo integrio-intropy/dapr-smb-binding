@@ -1,0 +1,22 @@
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: smb
+spec:
+  type: bindings.smb
+  version: v1
+  metadata:
+    - name: address
+      value: dc.lab.test
+    - name: share
+      value: exchange
+    - name: rootPath
+      value: out
+    - name: inboundPath
+      value: in
+    - name: username
+      value: svc-intropy@LAB.TEST
+    - name: password
+      value: "Svc!Passw0rd1"   # the integration lab's test account
+    - name: kdcs
+      value: dc.lab.test

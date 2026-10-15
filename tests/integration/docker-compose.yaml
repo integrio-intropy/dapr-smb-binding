@@ -1,0 +1,118 @@
+# Integration environment: a Samba AD DC (LAB.TEST) that refuses NTLM and
+# requires SMB 3 encryption, and a test runner on the same network.
+#
+#   make integration        # build, start the DC, run the suite, keep the DC up
+#   make integration-down   # remove everything, including the domain
+#
+# SMB_IT_EXPIRY=1 also runs the ticket-expiry test (waits ~4 minutes each).
+#
+#   make e2e                # the real image under a real daprd sidecar
+name: dapr-smb-binding-it
+
+services:
+  dc:
+    build: ./samba-dc
+    hostname: dc
+    domainname: lab.test
+    # Samba stores NT ACLs in security.* xattrs, which need CAP_SYS_ADMIN.
+    privileged: true
+    networks:
+      lab:
+        aliases: [dc.lab.test]
+    volumes:
+      - shared:/shared
+    healthcheck:
+      test: ["CMD", "bash", "-c", "test -f /shared/ready && </dev/tcp/127.0.0.1/445 && </dev/tcp/127.0.0.1/88"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+      start_period: 20s
+
+  tests:
+    build:
+      context: ../..
+      target: test
+    profiles: [tests]
+    depends_on:
+      dc:
+        condition: service_healthy
+    networks: [lab]
+    volumes:
+      - shared:/shared:ro
+    environment:
+      SMB_IT_ADDRESS: dc.lab.test
+      SMB_IT_SHARE: exchange
+      SMB_IT_REALM: LAB.TEST
+      SMB_IT_KDC: dc.lab.test
+      SMB_IT_USER: svc-intropy@LAB.TEST
+      SMB_IT_PASSWORD: "Svc!Passw0rd1"
+      SMB_IT_PARTNER_USER: partner@LAB.TEST
+      SMB_IT_PARTNER_PASSWORD: "Partner!Passw0rd1"
+      SMB_IT_KEYTAB: /shared/svc-intropy.keytab
+      SMB_IT_EXPIRY: ${SMB_IT_EXPIRY:-0}
+      SMB_BINDING_RUNTIME_DIR: /tmp/dapr-smb-binding
+
+  # ---------------------------------------------------------------- e2e under daprd
+  component:
+    build:
+      context: ../..
+    profiles: [dapr]
+    command: ["--log-level", "debug", "--health-port", "9464", "--exit-when-idle", "5s"]
+    depends_on:
+      dc:
+        condition: service_healthy
+    networks: [lab]
+    volumes:
+      - sockets:/tmp/dapr-components-sockets
+    healthcheck:
+      test: ["CMD", "test", "-S", "/tmp/dapr-components-sockets/smb.sock"]
+      interval: 1s
+      retries: 30
+
+  daprd:
+    image: daprio/daprd:1.18.7
+    profiles: [dapr]
+    entrypoint: ["/daprd"]
+    command:
+      - --app-id=smb-e2e
+      - --resources-path=/components
+      - --dapr-http-port=3500
+      - --app-port=8080
+      - --app-channel-address=e2e
+      - --log-level=debug
+    # Like a pod: daprd shares the component's network namespace.
+    network_mode: service:component
+    depends_on:
+      component:
+        condition: service_healthy
+    volumes:
+      - sockets:/tmp/dapr-components-sockets
+      - ./dapr-components:/components:ro
+
+  # The app for daprd, and the test driver.
+  e2e:
+    build:
+      context: ../..
+      target: test
+    profiles: [dapr]
+    entrypoint: ["pytest", "-m", "integration", "--timeout", "300", "tests/integration/test_dapr_e2e.py"]
+    depends_on: [daprd]
+    networks: [lab]
+    environment:
+      SMB_IT_DAPR_URL: http://component:3500  # daprd lives in the component's network
+      SMB_IT_ADDRESS: dc.lab.test
+      SMB_IT_SHARE: exchange
+      SMB_IT_REALM: LAB.TEST
+      SMB_IT_KDC: dc.lab.test
+      SMB_IT_USER: svc-intropy@LAB.TEST
+      SMB_IT_PASSWORD: "Svc!Passw0rd1"
+      SMB_IT_PARTNER_USER: partner@LAB.TEST
+      SMB_IT_PARTNER_PASSWORD: "Partner!Passw0rd1"
+      SMB_BINDING_RUNTIME_DIR: /tmp/dapr-smb-binding
+
+networks:
+  lab: {}
+
+volumes:
+  shared: {}
+  sockets: {}

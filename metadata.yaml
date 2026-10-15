@@ -1,0 +1,118 @@
+# Component metadata manifest, following the components-contrib convention.
+# Names follow the SFTP binding; extensions are in CONTRACT.md.
+schemaVersion: v1
+type: bindings
+name: smb
+version: v1
+status: alpha
+title: "SMB (Kerberos)"
+urls:
+  - title: Reference
+    url: https://github.com/integrio-intropy/dapr-smb-binding
+binding:
+  output: true
+  input: true
+  operations:
+    - name: create
+      description: "Write to a temp name, then rename to fileName. Never overwrites."
+    - name: get
+      description: "Read fileName."
+    - name: list
+      description: "List the folder in fileName, defaulting to rootPath."
+    - name: delete
+      description: "Delete fileName."
+    - name: rename
+      description: "Rename fileName to newFileName. Never overwrites."
+authenticationProfiles:
+  - title: "Kerberos with password"
+    metadata:
+      - name: username
+        required: true
+        example: '"svc-intropy@CORP.EXAMPLE.COM"'
+      - name: password
+        required: true
+        sensitive: true
+        example: '"*****"'
+  - title: "Kerberos with keytab"
+    metadata:
+      - name: authMode
+        required: true
+        example: '"kerberos-keytab"'
+      - name: keytab
+        required: true
+        sensitive: true
+        description: "The keytab file, base64, with AES keys."
+        example: '"BQIAAABH..."'
+      - name: username
+        required: false
+        description: "Principal to use from the keytab; the first one if empty."
+        example: '"svc-intropy@CORP.EXAMPLE.COM"'
+metadata:
+  - name: address
+    required: true
+    description: "File server FQDN as registered in AD (SPN cifs/<fqdn>), optionally :port. Never an IP."
+    example: '"fs01.corp.example.com"'
+    type: string
+  - name: share
+    required: true
+    example: '"exchange"'
+    type: string
+  - name: rootPath
+    required: true
+    description: "Folder inside the share for output operations."
+    example: '"in/from-intropy"'
+    type: string
+  - name: realm
+    required: false
+    description: "Kerberos realm; derived from username when it is user@REALM."
+    example: '"CORP.EXAMPLE.COM"'
+    type: string
+  - name: kdcs
+    required: false
+    description: "Comma-separated KDCs. Without them, KDCs are found through DNS."
+    example: '"dc1.corp.example.com,dc2.corp.example.com"'
+    type: string
+  - name: requireEncryption
+    required: false
+    default: '"true"'
+    example: '"true"'
+    type: bool
+  - name: timeout
+    required: false
+    default: '"30s"'
+    example: '"30s"'
+    type: duration
+  - name: tempFileNamePattern
+    required: false
+    default: '"{name}.tmp"'
+    example: '".{name}"'
+    type: string
+  - name: inboundPath
+    required: false
+    description: "Folder the input binding polls. Defaults to rootPath."
+    example: '"out/to-intropy"'
+    type: string
+  - name: filePattern
+    required: false
+    default: '"*"'
+    example: '"*.xml"'
+    type: string
+  - name: ignorePatterns
+    required: false
+    example: '"*.tmp,~*"'
+    type: string
+  - name: pollInterval
+    required: false
+    default: '"10s"'
+    example: '"10s"'
+    type: duration
+  - name: processedFolder
+    required: false
+    default: '"processed"'
+    example: '"processed"'
+    type: string
+  - name: errorFolder
+    required: false
+    default: '"error"'
+    example: '"error"'
+    type: string

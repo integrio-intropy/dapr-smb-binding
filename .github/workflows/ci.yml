@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# A new push to a PR supersedes its running checks; main keeps every run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: Lint and unit test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install -e '.[dev]' pytest-timeout
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pytest --timeout 60
+      - name: Generated stubs are up to date
+        run: |
+          make proto VENV=/tmp/venv
+          git diff --exit-code -- src/dapr_smb_binding/_proto
+
+  integration:
+    name: Integration (Samba AD DC)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Start the domain controller
+        run: docker compose -f tests/integration/docker-compose.yaml up -d --build --wait dc
+      - name: Run the suite, including ticket expiry
+        run: docker compose -f tests/integration/docker-compose.yaml run --rm --build tests -rA
+        env:
+          SMB_IT_EXPIRY: "1"
+      - name: End to end under daprd
+        run: make e2e
+      - name: Logs on failure
+        if: failure()
+        run: docker compose -f tests/integration/docker-compose.yaml --profile dapr logs --no-color
+
+  security:
+    name: Vulnerabilities and licences
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y libkrb5-dev
+      - run: pip install '.[kerberos]' pip-audit pip-licenses
+      - run: pip-audit --skip-editable
+      - name: No copyleft dependencies
+        run: pip-licenses --fail-on="GNU General Public License v2 (GPLv2);GNU General Public License v3 (GPLv3);GNU Affero General Public License v3 (AGPLv3)"
+
+  docker:
+    # One native runner per architecture. Under QEMU the arm64 build compiles
+    # gssapi and krb5 (no Linux wheels on PyPI) 10-30x slower.
+    name: Container image (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          load: true
+          platforms: linux/${{ matrix.arch }}
+          tags: dapr-smb-binding:ci
+          cache-from: type=gha,scope=image-${{ matrix.arch }}
+          cache-to: type=gha,scope=image-${{ matrix.arch }},mode=max
+      - name: Smoke test
+        run: docker run --rm dapr-smb-binding:ci --version
