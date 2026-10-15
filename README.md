@@ -125,11 +125,17 @@ See [examples/kubernetes](examples/kubernetes) and
 container's liveness probe at `/healthz` (`--health-port`): it fails when an
 input stream has closed, which the sidecar never reopens by itself.
 
+**Jobs and CronJobs** need `--exit-when-idle`. A pod only completes once every
+container has stopped, and Dapr injects this binding as an ordinary container,
+so without it a Job would never finish. Use a separate Component for Jobs; see
+[examples/kubernetes](examples/kubernetes/README.md#jobs-and-cronjobs).
+
 | Flag | Default | |
 |---|---|---|
 | `--socket-name` | `smb` | Socket file name; `spec.type` is `bindings.<name>`. |
 | `--max-message-size` | `5242880` | Raise with the sidecar's `dapr.io/max-body-size`. |
 | `--health-port` | `0` (off) | Serve `/healthz`. |
+| `--exit-when-idle` | off | Exit once the sidecar has connected and then been gone this long, e.g. `30s`. For Jobs and CronJobs; leave off for Deployments. |
 | `--log-level` | `info` | `debug`, `info`, `warning`, `error`. |
 
 ## Development

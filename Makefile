@@ -56,9 +56,18 @@ integration-up:
 
 # The production image as a pluggable component under a real daprd sidecar.
 # `up`, not `run`: daprd reaches the app by its service name, which a `run`
-# container does not get.
+# container does not get. Then --exit-when-idle: once daprd is gone, the
+# component must exit by itself, with 0, so a Job's pod can complete.
 e2e: integration-up
-	$(COMPOSE) --profile dapr up --build --exit-code-from e2e component daprd e2e
+	$(COMPOSE) --profile dapr up -d --build --force-recreate component daprd e2e
+	@$(COMPOSE) --profile dapr wait e2e >/dev/null; code=$$?; \
+	  $(COMPOSE) --profile dapr logs --no-log-prefix e2e | tail -3; test $$code = 0
+	$(COMPOSE) --profile dapr stop daprd
+	@for i in $$(seq 30); do \
+	  state=$$($(COMPOSE) --profile dapr ps -a --format '{{.State}} {{.ExitCode}}' component); \
+	  case "$$state" in exited*) echo "component $$state after daprd stopped"; test "$$state" = "exited 0"; exit;; esac; \
+	  sleep 1; \
+	done; echo "component still running 30s after daprd stopped"; exit 1
 
 integration-down:
 	$(COMPOSE) --profile dapr --profile tests down -v
