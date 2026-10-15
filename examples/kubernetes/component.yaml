@@ -9,7 +9,7 @@ metadata:
     dapr.io/component-container: >
       {
         "name": "smb-binding",
-        "image": "harbor.intropy.io/platform/dapr-smb-binding:v0.1.0",
+        "image": "harbor.intropy.io/platform/dapr-smb-binding:0.1.0",
         "args": ["--health-port", "9464"],
         "volumeMounts": [
           { "name": "dapr-unix-domain-socket", "mountPath": "/tmp/dapr-components-sockets" },
