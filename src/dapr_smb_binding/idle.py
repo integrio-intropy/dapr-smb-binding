@@ -11,8 +11,12 @@ shares and which daprd listens on for as long as it runs. Its connection to
 our socket is not a usable signal: daprd closes that after 30 minutes without
 calls while it keeps running.
 
-Off by default, and it must stay off for Deployments: there a sidecar restart
-is routine and the component has to still be listening afterwards.
+The pod opts in, not the Component: the injected container is the same in
+every pod that uses the Component, so the timeout comes from
+SMB_BINDING_EXIT_WHEN_IDLE, which the container maps from a pod annotation with
+the downward API. A Job's pod sets the annotation; a Deployment's leaves it out,
+which keeps this off: there a sidecar restart is routine and the component has
+to still be listening afterwards.
 """
 
 from __future__ import annotations
@@ -22,12 +26,26 @@ import os
 import socket
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+
+from .config import parse_duration
 
 log = logging.getLogger(__name__)
 
+# The idle timeout the pod asked for, e.g. "30s". Unset or empty: never exit.
+TIMEOUT_ENV = "SMB_BINDING_EXIT_WHEN_IDLE"
+
 # daprd's HTTP port, as the injector configures it; DAPR_HTTP_PORT if set.
 DEFAULT_DAPR_HTTP_PORT = 3500
+
+
+def timeout_from_env(environ: Mapping[str, str] = os.environ) -> float:
+    """The idle timeout in seconds, or 0 (off) when the pod set none.
+
+    Raises ConfigError for a value that is not a duration, so a typo in the
+    annotation stops the binding instead of silently leaving the Job running.
+    """
+    return parse_duration(TIMEOUT_ENV, environ.get(TIMEOUT_ENV, ""), 0.0)
 
 
 def sidecar_running(port: int | None = None) -> bool:

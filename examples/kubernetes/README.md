@@ -44,11 +44,22 @@ completes.
 
 Run the Job with `restartPolicy: OnFailure` and `backoffLimit: 5` (see
 [Startup order](#startup-order-daprd-restarts-once)), and let the binding exit
-when the sidecar does, with this in the
-`dapr.io/component-container` annotation:
+when the sidecar does, with this annotation on the Job's pod template:
+
+```yaml
+smb-binding.intropy.io/exit-when-idle: "30s"
+```
+
+The container in [`component.yaml`](component.yaml) maps it to
+`SMB_BINDING_EXIT_WHEN_IDLE` with the downward API:
 
 ```json
-"args": ["--health-port", "9464", "--exit-when-idle", "30s"]
+"env": [
+  {
+    "name": "SMB_BINDING_EXIT_WHEN_IDLE",
+    "valueFrom": { "fieldRef": { "fieldPath": "metadata.annotations['smb-binding.intropy.io/exit-when-idle']" } }
+  }
+]
 ```
 
 It watches the sidecar's HTTP port on `localhost` (3500, or `DAPR_HTTP_PORT`),
@@ -60,7 +71,7 @@ has been seen, and a restart within the timeout resets it.
 (Not the sidecar's connection to the binding's socket: daprd closes that after
 30 minutes without calls while it keeps running.)
 
-Give Jobs a **separate Component** from the one your Deployments use, scoped to
-the Jobs' app-ids. The flag lives on the container, so every pod that injects
-that Component gets it, and in a Deployment an ordinary sidecar restart would
-then take the binding down with it.
+Leave the annotation off a Deployment's pods: there the variable is empty and
+the binding never exits by itself, so an ordinary sidecar restart cannot take it
+down. The container spec is the Component's and the same in every pod; only the
+pod annotation differs, so Jobs and Deployments share one Component.
