@@ -111,7 +111,9 @@ Each of these is a known extension, to add when it is needed:
   component's inbound direction (see CONTRACT.md).
 - **Files are single messages** (4 MiB by default). Raise `--max-message-size`
   with the sidecar's `dapr.io/max-body-size`; inbound files over the limit go to
-  `errorFolder`.
+  `errorFolder`. Over 4 MiB needs **Dapr 1.19 or later**: earlier sidecars read
+  a component's responses (inbound files, `get`) with gRPC's 4 MiB default
+  whatever `max-body-size` says ([dapr#10670](https://github.com/dapr/dapr/pull/10670)).
 - **No overwrite, unique names, markers, stability checks or temp file
   cleanup.** A crash between write and rename leaves `name.tmp` behind until
   the next `create` of that name overwrites it.
@@ -141,7 +143,7 @@ same pod finds it. See
 | Flag | Default | |
 |---|---|---|
 | `--socket-name` | `smb` | Socket file name; `spec.type` is `bindings.<name>`. |
-| `--max-message-size` | `5242880` | Raise with the sidecar's `dapr.io/max-body-size`. |
+| `--max-message-size` | `5242880` | Raise with the sidecar's `dapr.io/max-body-size`; over 4 MiB needs Dapr 1.19 or later. |
 | `--health-port` | `0` (off) | Serve `/healthz`. |
 | `--exit-when-idle` | off | Exit once the sidecar has been up and then gone this long, e.g. `30s`. Set it on the Component; a pod overrides it with `SMB_BINDING_EXIT_WHEN_IDLE`. |
 | `--log-level` | `info` | `debug`, `info`, `warning`, `error`. |
