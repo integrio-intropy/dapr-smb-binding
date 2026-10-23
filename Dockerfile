@@ -22,6 +22,14 @@ print('\n'.join(p['dependencies'] + p['optional-dependencies']['kerberos']))" > 
 
 COPY README.md LICENSE ./
 COPY src ./src
+# The release workflow passes the tag, e.g. v0.2.0. Stamp it into the package
+# so --version and the startup log report it; other builds keep the source's
+# version. After the dependency layer, so a release still reuses it.
+ARG VERSION=dev
+RUN if [ "$VERSION" != dev ]; then \
+      sed -i "s/^__version__ = .*/__version__ = \"${VERSION#v}\"/" src/dapr_smb_binding/__init__.py \
+   && grep -qx "__version__ = \"${VERSION#v}\"" src/dapr_smb_binding/__init__.py; \
+    fi
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip wheel --no-deps --wheel-dir /wheels .
 
