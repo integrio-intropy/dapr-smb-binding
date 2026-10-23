@@ -17,6 +17,9 @@ spec:
         dapr.io/app-id: "file-adapter"
         dapr.io/app-port: "8080"
         dapr.io/inject-pluggable-components: "true"
+        # The Component's --exit-when-idle is for Jobs. Here a sidecar restart is
+        # routine and the binding has to keep listening.
+        smb-binding.intropy.io/exit-when-idle: "off"
         # Files are single gRPC messages. Raise together with the component's
         # --max-message-size (in component.yaml args) for files over ~4 MiB.
         # dapr.io/max-body-size: "16Mi"

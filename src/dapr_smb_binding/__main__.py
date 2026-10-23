@@ -17,7 +17,7 @@ from grpc_reflection.v1alpha import reflection
 from . import __version__, idle
 from ._proto import bindings_pb2 as pb
 from ._proto import bindings_pb2_grpc as pb_grpc
-from .config import Config, ConfigError
+from .config import Config, ConfigError, parse_duration
 from .fs import FileSystem
 from .server import InputService, OutputService, Registry
 
@@ -54,12 +54,19 @@ def serve_health(port: int, reg: Registry) -> None:
     threading.Thread(target=srv.serve_forever, daemon=True).start()
 
 
+def duration(s: str) -> float:
+    try:
+        return parse_duration("duration", s, 0.0)
+    except ConfigError as e:
+        raise argparse.ArgumentTypeError(str(e)) from None
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         prog="smb-binding",
         description=__doc__,
-        epilog=f"{idle.TIMEOUT_ENV}: exit once the sidecar has been up and then gone this long, e.g. 30s; "
-        "set it for a Job's pod, leave it unset for a Deployment's.",
+        epilog=f"{idle.TIMEOUT_ENV}: the pod's override of --exit-when-idle, e.g. 30s, or {idle.OFF}; "
+        "set it to off for a Deployment's pod.",
     )
     p.add_argument(
         "--socket-name", default="smb", help="socket file name without .sock; spec.type is bindings.<name>"
@@ -71,6 +78,13 @@ def main(argv: list[str] | None = None) -> int:
         help="maximum gRPC message in bytes; raise with the sidecar's dapr.io/max-body-size",
     )
     p.add_argument("--health-port", type=int, default=0, help="serve /healthz on this port; 0 = off")
+    p.add_argument(
+        "--exit-when-idle",
+        type=duration,
+        default=0.0,
+        help="exit once the sidecar has been up and then gone this long, e.g. 30s; the Component's "
+        f"default, which a pod overrides with {idle.TIMEOUT_ENV}",
+    )
     p.add_argument("--log-level", default="info", choices=("debug", "info", "warning", "error"))
     p.add_argument("--version", action="version", version=__version__)
     args = p.parse_args(argv)
@@ -83,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
     try:
-        exit_when_idle = idle.timeout_from_env()
+        exit_when_idle = idle.timeout(args.exit_when_idle)
     except ConfigError as e:
         log.error("%s", e)
         return 2

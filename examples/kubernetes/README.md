@@ -43,23 +43,12 @@ and shuts the sidecar down, the binding keeps running and the Job never
 completes.
 
 Run the Job with `restartPolicy: OnFailure` and `backoffLimit: 5` (see
-[Startup order](#startup-order-daprd-restarts-once)), and let the binding exit
-when the sidecar does, with this annotation on the Job's pod template:
-
-```yaml
-smb-binding.intropy.io/exit-when-idle: "30s"
-```
-
-The container in [`component.yaml`](component.yaml) maps it to
-`SMB_BINDING_EXIT_WHEN_IDLE` with the downward API:
+[Startup order](#startup-order-daprd-restarts-once)). The binding exits when
+the sidecar does, because [`component.yaml`](component.yaml) turns that on for
+every pod:
 
 ```json
-"env": [
-  {
-    "name": "SMB_BINDING_EXIT_WHEN_IDLE",
-    "valueFrom": { "fieldRef": { "fieldPath": "metadata.annotations['smb-binding.intropy.io/exit-when-idle']" } }
-  }
-]
+"args": ["--health-port", "9464", "--exit-when-idle", "30s"]
 ```
 
 It watches the sidecar's HTTP port on `localhost` (3500, or `DAPR_HTTP_PORT`),
@@ -71,7 +60,21 @@ has been seen, and a restart within the timeout resets it.
 (Not the sidecar's connection to the binding's socket: daprd closes that after
 30 minutes without calls while it keeps running.)
 
-Leave the annotation off a Deployment's pods: there the variable is empty and
-the binding never exits by itself, so an ordinary sidecar restart cannot take it
-down. The container spec is the Component's and the same in every pod; only the
-pod annotation differs, so Jobs and Deployments share one Component.
+A **Deployment's pods turn it off** with this annotation on the pod template
+(see [`deployment.yaml`](deployment.yaml)), so an ordinary sidecar restart
+cannot take the binding down:
+
+```yaml
+smb-binding.intropy.io/exit-when-idle: "off"
+```
+
+The container in [`component.yaml`](component.yaml) maps it to
+`SMB_BINDING_EXIT_WHEN_IDLE` with the downward API, and a value there overrides
+`--exit-when-idle`; a pod without the annotation gets an empty value and keeps
+the flag. The container spec is the Component's and the same in every pod; only
+the pod annotation differs, so Jobs and Deployments share one Component.
+
+The default is on, not off, because forgetting the annotation should be loud.
+A Deployment without it exits once its sidecar has been gone for 30 s, and
+restarts and alerts. A Job whose binding never exits just hangs, and with
+`concurrencyPolicy: Forbid` its CronJob never runs again.

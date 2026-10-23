@@ -57,10 +57,8 @@ services:
     build:
       context: ../..
     profiles: [dapr]
-    command: ["--log-level", "debug", "--health-port", "9464"]
-    environment:
-      # What a Job's pod gets from its annotation.
-      SMB_BINDING_EXIT_WHEN_IDLE: 5s
+    # A Job's pod: the Component's default, no annotation.
+    command: ["--log-level", "debug", "--health-port", "9464", "--exit-when-idle", "5s"]
     depends_on:
       dc:
         condition: service_healthy

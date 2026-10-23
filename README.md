@@ -127,12 +127,15 @@ input stream has closed, which the sidecar never reopens by itself.
 
 **Jobs and CronJobs** need the binding to exit by itself. A pod only completes
 once every container has stopped, and Dapr injects this binding as an ordinary
-container, so otherwise a Job would never finish. The pod opts in with the
-annotation `smb-binding.intropy.io/exit-when-idle` (e.g. `"30s"`), which the
-component's container maps to `SMB_BINDING_EXIT_WHEN_IDLE`, so one Component
-serves Jobs and Deployments alike. Jobs also need `restartPolicy: OnFailure`:
-daprd looks for component sockets once, before the injected binding is
-listening, and exits; the restart in the same pod finds it. See
+container, so otherwise a Job would never finish. The Component turns this on
+with `--exit-when-idle` (e.g. `30s`), and **Deployments turn it off** with the
+pod annotation `smb-binding.intropy.io/exit-when-idle: "off"`, which the
+component's container maps to `SMB_BINDING_EXIT_WHEN_IDLE`. One Component
+serves Jobs and Deployments alike, and forgetting the annotation is loud: a
+Deployment's binding restarts and alerts, rather than a Job hanging silently.
+Jobs also need `restartPolicy: OnFailure`: daprd looks for component sockets
+once, before the injected binding is listening, and exits; the restart in the
+same pod finds it. See
 [examples/kubernetes](examples/kubernetes/README.md#jobs-and-cronjobs).
 
 | Flag | Default | |
@@ -140,11 +143,12 @@ listening, and exits; the restart in the same pod finds it. See
 | `--socket-name` | `smb` | Socket file name; `spec.type` is `bindings.<name>`. |
 | `--max-message-size` | `5242880` | Raise with the sidecar's `dapr.io/max-body-size`. |
 | `--health-port` | `0` (off) | Serve `/healthz`. |
+| `--exit-when-idle` | off | Exit once the sidecar has been up and then gone this long, e.g. `30s`. Set it on the Component; a pod overrides it with `SMB_BINDING_EXIT_WHEN_IDLE`. |
 | `--log-level` | `info` | `debug`, `info`, `warning`, `error`. |
 
 | Environment | Default | |
 |---|---|---|
-| `SMB_BINDING_EXIT_WHEN_IDLE` | off | Exit once the sidecar has been up and then gone this long, e.g. `30s`. Set for Jobs and CronJobs, from the pod annotation `smb-binding.intropy.io/exit-when-idle`; leave unset for Deployments. A value that is not a duration stops the binding at startup. |
+| `SMB_BINDING_EXIT_WHEN_IDLE` | `--exit-when-idle` | The pod's override, from the annotation `smb-binding.intropy.io/exit-when-idle`: a duration, or `off` for Deployments. Unset or empty keeps the flag. Anything else stops the binding at startup. |
 
 ## Development
 

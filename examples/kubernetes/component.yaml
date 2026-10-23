@@ -6,14 +6,15 @@ metadata:
     # Dapr injects this container into pods that set
     # dapr.io/inject-pluggable-components: "true". The pod must also define the
     # smb-binding-runtime volume (see deployment.yaml). The injector mounts the
-    # components socket folder itself. A Job's pod sets the annotation
-    # smb-binding.intropy.io/exit-when-idle, mapped to SMB_BINDING_EXIT_WHEN_IDLE
-    # below, so the binding exits with the sidecar and the Job can complete.
+    # components socket folder itself. --exit-when-idle lets the binding exit
+    # with the sidecar, so a Job can complete. A Deployment's pod turns that off
+    # with the annotation smb-binding.intropy.io/exit-when-idle: "off", mapped to
+    # SMB_BINDING_EXIT_WHEN_IDLE below.
     dapr.io/component-container: >
       {
         "name": "smb-binding",
         "image": "harbor.intropy.io/platform/dapr-smb-binding:0.2.0",
-        "args": ["--health-port", "9464"],
+        "args": ["--health-port", "9464", "--exit-when-idle", "30s"],
         "env": [
           {
             "name": "SMB_BINDING_EXIT_WHEN_IDLE",

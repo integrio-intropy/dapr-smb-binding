@@ -56,7 +56,7 @@ integration-up:
 
 # The production image as a pluggable component under a real daprd sidecar.
 # `up`, not `run`: daprd reaches the app by its service name, which a `run`
-# container does not get. Then SMB_BINDING_EXIT_WHEN_IDLE: once daprd is gone, the
+# container does not get. Then --exit-when-idle: once daprd is gone, the
 # component must exit by itself, with 0, so a Job's pod can complete.
 e2e: integration-up
 	$(COMPOSE) --profile dapr up -d --build --force-recreate component daprd e2e
