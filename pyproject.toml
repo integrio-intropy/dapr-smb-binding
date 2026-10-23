@@ -24,7 +24,9 @@ dependencies = [
 kerberos = ["smbprotocol[kerberos]>=1.17,<2"]
 dev = [
   "pytest>=8",
-  "grpcio-tools>=1.84,<2",
+  # Exact: the generated stubs carry its version, and CI checks they are up to
+  # date. Bump it together with `make proto`.
+  "grpcio-tools==1.84.0",
   "ruff>=0.6",
 ]
 
