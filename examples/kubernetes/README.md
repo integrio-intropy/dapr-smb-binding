@@ -43,9 +43,9 @@ and shuts the sidecar down, the binding keeps running and the Job never
 completes.
 
 Run the Job with `restartPolicy: OnFailure` and `backoffLimit: 5` (see
-[Startup order](#startup-order-daprd-restarts-once)), and let the binding exit
-when the sidecar does, with this in the
-`dapr.io/component-container` annotation:
+[Startup order](#startup-order-daprd-restarts-once)). The binding exits when
+the sidecar does, because [`component.yaml`](component.yaml) turns that on for
+every pod:
 
 ```json
 "args": ["--health-port", "9464", "--exit-when-idle", "30s"]
@@ -60,7 +60,21 @@ has been seen, and a restart within the timeout resets it.
 (Not the sidecar's connection to the binding's socket: daprd closes that after
 30 minutes without calls while it keeps running.)
 
-Give Jobs a **separate Component** from the one your Deployments use, scoped to
-the Jobs' app-ids. The flag lives on the container, so every pod that injects
-that Component gets it, and in a Deployment an ordinary sidecar restart would
-then take the binding down with it.
+A **Deployment's pods turn it off** with this annotation on the pod template
+(see [`deployment.yaml`](deployment.yaml)), so an ordinary sidecar restart
+cannot take the binding down:
+
+```yaml
+smb-binding.intropy.io/exit-when-idle: "off"
+```
+
+The container in [`component.yaml`](component.yaml) maps it to
+`SMB_BINDING_EXIT_WHEN_IDLE` with the downward API, and a value there overrides
+`--exit-when-idle`; a pod without the annotation gets an empty value and keeps
+the flag. The container spec is the Component's and the same in every pod; only
+the pod annotation differs, so Jobs and Deployments share one Component.
+
+The default is on, not off, because forgetting the annotation should be loud.
+A Deployment without it exits once its sidecar has been gone for 30 s, and
+restarts and alerts. A Job whose binding never exits just hangs, and with
+`concurrencyPolicy: Forbid` its CronJob never runs again.

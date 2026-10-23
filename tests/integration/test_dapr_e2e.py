@@ -25,6 +25,8 @@ pytestmark = pytest.mark.integration
 
 DAPR = os.environ.get("SMB_IT_DAPR_URL", "")
 APP_PORT = 8080
+# Over gRPC's 4 MiB default, under the 16Mi that docker-compose.yaml gives daprd.
+LARGE = 6 << 20
 
 
 @pytest.fixture(scope="module")
@@ -155,3 +157,25 @@ def test_input_through_daprd(app, share):
     received.get(timeout=60)
     eventually(lambda: names_in(share, "e2e/in/error"), ["bad.xml"])
     assert names_in(share, "e2e/in") == []
+
+
+@pytest.mark.skipif(not DAPR, reason="run through `make e2e`")
+def test_files_over_4_mib_through_daprd(app, share):
+    # Both are responses from the component, which daprd before 1.19 read with
+    # gRPC's 4 MiB default whatever --max-body-size said (dapr#10670).
+    received, reject = app
+    reject.clear()
+    wait_ready(app)
+    payload = b"<large>" + b"x" * LARGE + b"</large>"
+
+    share.write("e2e/out/large.xml", payload)
+    status, body = dapr("get", fileName="large.xml")
+    assert status == 200
+    assert body == payload
+    dapr("delete", fileName="large.xml")
+
+    share.write("e2e/in/large.xml", payload)
+    path, _, body = received.get(timeout=60)
+    assert path == "/smb"
+    assert body == payload
+    eventually(lambda: "large.xml" in names_in(share, "e2e/in/processed"), True)

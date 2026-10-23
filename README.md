@@ -111,7 +111,9 @@ Each of these is a known extension, to add when it is needed:
   component's inbound direction (see CONTRACT.md).
 - **Files are single messages** (4 MiB by default). Raise `--max-message-size`
   with the sidecar's `dapr.io/max-body-size`; inbound files over the limit go to
-  `errorFolder`.
+  `errorFolder`. Over 4 MiB needs **Dapr 1.19 or later**: earlier sidecars read
+  a component's responses (inbound files, `get`) with gRPC's 4 MiB default
+  whatever `max-body-size` says ([dapr#10670](https://github.com/dapr/dapr/pull/10670)).
 - **No overwrite, unique names, markers, stability checks or temp file
   cleanup.** A crash between write and rename leaves `name.tmp` behind until
   the next `create` of that name overwrites it.
@@ -125,21 +127,30 @@ See [examples/kubernetes](examples/kubernetes) and
 container's liveness probe at `/healthz` (`--health-port`): it fails when an
 input stream has closed, which the sidecar never reopens by itself.
 
-**Jobs and CronJobs** need `--exit-when-idle`. A pod only completes once every
-container has stopped, and Dapr injects this binding as an ordinary container,
-so without it a Job would never finish. Jobs also need `restartPolicy: OnFailure`:
-daprd looks for component sockets once, before the injected binding is
-listening, and exits; the restart in the same pod finds it. Use a separate
-Component for Jobs; see
+**Jobs and CronJobs** need the binding to exit by itself. A pod only completes
+once every container has stopped, and Dapr injects this binding as an ordinary
+container, so otherwise a Job would never finish. The Component turns this on
+with `--exit-when-idle` (e.g. `30s`), and **Deployments turn it off** with the
+pod annotation `smb-binding.intropy.io/exit-when-idle: "off"`, which the
+component's container maps to `SMB_BINDING_EXIT_WHEN_IDLE`. One Component
+serves Jobs and Deployments alike, and forgetting the annotation is loud: a
+Deployment's binding restarts and alerts, rather than a Job hanging silently.
+Jobs also need `restartPolicy: OnFailure`: daprd looks for component sockets
+once, before the injected binding is listening, and exits; the restart in the
+same pod finds it. See
 [examples/kubernetes](examples/kubernetes/README.md#jobs-and-cronjobs).
 
 | Flag | Default | |
 |---|---|---|
 | `--socket-name` | `smb` | Socket file name; `spec.type` is `bindings.<name>`. |
-| `--max-message-size` | `5242880` | Raise with the sidecar's `dapr.io/max-body-size`. |
+| `--max-message-size` | `5242880` | Raise with the sidecar's `dapr.io/max-body-size`; over 4 MiB needs Dapr 1.19 or later. |
 | `--health-port` | `0` (off) | Serve `/healthz`. |
-| `--exit-when-idle` | off | Exit once the sidecar has been up and then gone this long, e.g. `30s`. For Jobs and CronJobs; leave off for Deployments. |
+| `--exit-when-idle` | off | Exit once the sidecar has been up and then gone this long, e.g. `30s`. Set it on the Component; a pod overrides it with `SMB_BINDING_EXIT_WHEN_IDLE`. |
 | `--log-level` | `info` | `debug`, `info`, `warning`, `error`. |
+
+| Environment | Default | |
+|---|---|---|
+| `SMB_BINDING_EXIT_WHEN_IDLE` | `--exit-when-idle` | The pod's override, from the annotation `smb-binding.intropy.io/exit-when-idle`: a duration, or `off` for Deployments. Unset or empty keeps the flag. Anything else stops the binding at startup. |
 
 ## Development
 

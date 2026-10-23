@@ -95,6 +95,10 @@ Data is raw bytes over gRPC (the Dapr SDKs). Dapr's HTTP API JSON-encodes a
 string `data`, so a string sent with curl arrives quoted; that is Dapr, for
 every binding. A file is one gRPC message, 4 MiB by default; raise the
 component's `--max-message-size` with the sidecar's `dapr.io/max-body-size`.
+Files over 4 MiB need Dapr 1.19 or later: earlier sidecars read the
+component's responses, which carry inbound files and `get` results, with
+gRPC's 4 MiB default whatever `max-body-size` says
+([dapr#10670](https://github.com/dapr/dapr/pull/10670)).
 
 ## Errors
 

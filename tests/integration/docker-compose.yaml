@@ -57,7 +57,13 @@ services:
     build:
       context: ../..
     profiles: [dapr]
-    command: ["--log-level", "debug", "--health-port", "9464", "--exit-when-idle", "5s"]
+    # A Job's pod: the Component's default, no annotation.
+    # --max-message-size matches daprd's --max-body-size below.
+    command:
+      - --log-level=debug
+      - --health-port=9464
+      - --exit-when-idle=5s
+      - --max-message-size=16777216
     depends_on:
       dc:
         condition: service_healthy
@@ -70,7 +76,9 @@ services:
       retries: 30
 
   daprd:
-    image: daprio/daprd:1.18.7
+    # 1.19 or later: before it, daprd read the component's responses with
+    # gRPC's 4 MiB default whatever --max-body-size said (dapr#10670).
+    image: daprio/daprd:1.19.0
     profiles: [dapr]
     entrypoint: ["/daprd"]
     command:
@@ -80,6 +88,7 @@ services:
       - --app-port=8080
       - --app-channel-address=e2e
       - --log-level=debug
+      - --max-body-size=16Mi
     # Like a pod: daprd shares the component's network namespace.
     network_mode: service:component
     depends_on:

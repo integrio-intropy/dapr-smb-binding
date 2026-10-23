@@ -11,8 +11,16 @@ shares and which daprd listens on for as long as it runs. Its connection to
 our socket is not a usable signal: daprd closes that after 30 minutes without
 calls while it keeps running.
 
-Off by default, and it must stay off for Deployments: there a sidecar restart
-is routine and the component has to still be listening afterwards.
+The Component sets the default with --exit-when-idle, and a pod overrides it
+with SMB_BINDING_EXIT_WHEN_IDLE, which the container maps from a pod annotation
+with the downward API. The injected container is the same in every pod that
+uses the Component, so the annotation is what tells a Job's pod from a
+Deployment's. A Deployment's pod sets it to "off": there a sidecar restart is
+routine and the component has to still be listening afterwards.
+
+On by default on the Component, because forgetting the annotation should be
+loud: a Deployment that exits restarts, fails and alerts, while a Job whose
+binding never exits just hangs and its CronJob never runs again.
 """
 
 from __future__ import annotations
@@ -22,12 +30,34 @@ import os
 import socket
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+
+from .config import parse_duration
 
 log = logging.getLogger(__name__)
 
+# The pod's override of --exit-when-idle, e.g. "30s", or OFF. Unset or empty: the flag.
+TIMEOUT_ENV = "SMB_BINDING_EXIT_WHEN_IDLE"
+OFF = "off"
+
 # daprd's HTTP port, as the injector configures it; DAPR_HTTP_PORT if set.
 DEFAULT_DAPR_HTTP_PORT = 3500
+
+
+def timeout(default: float, environ: Mapping[str, str] = os.environ) -> float:
+    """The idle timeout in seconds, or 0 when off.
+
+    The pod's SMB_BINDING_EXIT_WHEN_IDLE wins when set, and "off" turns idle exit
+    off. Unset or empty, which is what a pod without the annotation gets, falls
+    back to default, the Component's --exit-when-idle.
+
+    Raises ConfigError for anything else that is not a duration, so a typo in
+    the annotation stops the binding instead of being silently ignored.
+    """
+    value = environ.get(TIMEOUT_ENV, "")
+    if value.strip().lower() == OFF:
+        return 0.0
+    return parse_duration(TIMEOUT_ENV, value, default)
 
 
 def sidecar_running(port: int | None = None) -> bool:
