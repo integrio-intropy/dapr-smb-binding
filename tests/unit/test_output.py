@@ -103,3 +103,32 @@ def test_metadata_keys_case_insensitive(lfs):
 def test_unsupported_operation(lfs):
     with pytest.raises(SmbError, match='unsupported operation "move"'):
         binding(lfs).invoke("move", b"", {})
+
+
+def test_get_exclusive_refuses_a_file_the_partner_has_open(lfs):
+    lfs.put("out/a.xml", b"half")
+    lfs.open_by_partner.add("out/a.xml")
+    assert binding(lfs).invoke("get", b"", {"fileName": "a.xml"}).data == b"half"
+    with pytest.raises(SmbError) as e:
+        binding(lfs).invoke("get", b"", {"fileName": "a.xml", "exclusive": "true"})
+    assert e.value.kind is Kind.SHARING_VIOLATION
+
+
+def test_get_exclusive_must_be_a_boolean(lfs):
+    lfs.put("out/a.xml")
+    with pytest.raises(SmbError, match="exclusive must be") as e:
+        binding(lfs).invoke("get", b"", {"fileName": "a.xml", "exclusive": "yes"})
+    assert e.value.kind is Kind.INVALID
+
+
+def test_list_skips_our_own_temp_names(lfs):
+    lfs.put("out/a.xml")
+    lfs.put("out/b.xml.tmp")
+    lfs.put("out/.c.xml")
+    names = [e["fileName"] for e in json.loads(binding(lfs).invoke("list", b"", {}).data)]
+    assert sorted(names) == [".c.xml", "a.xml"]
+    names = [
+        e["fileName"]
+        for e in json.loads(binding(lfs, tempFileNamePattern=".{name}").invoke("list", b"", {}).data)
+    ]
+    assert sorted(names) == ["a.xml", "b.xml.tmp"]

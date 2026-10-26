@@ -16,9 +16,9 @@ binding:
     - name: create
       description: "Write to a temp name, then rename to fileName. Never overwrites."
     - name: get
-      description: "Read fileName."
+      description: "Read fileName. With exclusive: \"true\", refused while someone else has it open."
     - name: list
-      description: "List the folder in fileName, defaulting to rootPath."
+      description: "List the folder in fileName, defaulting to rootPath. Our own temp names are left out."
     - name: delete
       description: "Delete fileName."
     - name: rename

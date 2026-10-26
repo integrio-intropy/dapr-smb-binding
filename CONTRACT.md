@@ -47,13 +47,19 @@ Request metadata keys are case-insensitive.
 | Operation | Request metadata | Response data | Response metadata |
 |---|---|---|---|
 | `create` | `fileName` | `{"fileName": "<path relative to rootPath>"}` | `fileName`, `filePath` **ext** |
-| `get` | `fileName` | the bytes | `fileName`, `size` **ext** |
+| `get` | `fileName`, `exclusive` **ext** | the bytes | `fileName`, `size` **ext** |
 | `list` | `fileName` (optional folder) | `[{"fileName", "isDirectory", "size" ext, "modTime" ext}]` | |
 | `delete` | `fileName` | empty | |
 | `rename` **ext** | `fileName`, `newFileName` | `{"fileName": "<new path>"}` | `fileName`, `filePath` |
 
 `create` creates missing parent folders, as SFTP does. `create` and `rename`
 fail if the target exists. `modTime` is RFC 3339 UTC.
+
+`get` with `exclusive: "true"` refuses a file someone else has open (SMB:
+`STATUS_SHARING_VIOLATION`, gRPC `UNAVAILABLE`), so a caller sweeping a folder
+through the output binding never reads a half-written file. Default `"false"`;
+a binding that cannot detect it ignores the key. `list` leaves out names
+matching the binding's own `tempFileNamePattern`.
 
 ## Input binding **ext**
 

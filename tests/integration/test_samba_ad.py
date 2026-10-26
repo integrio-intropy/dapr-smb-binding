@@ -157,6 +157,23 @@ def test_eight_mib_roundtrip(fs, base):
     assert b.invoke("get", b"", {"fileName": "big.bin"}).data == data
 
 
+def test_exclusive_get_waits_for_the_partner_to_close(fs, base, partner):
+    b = OutputBinding(config(base), fs)
+    f = partner("out/order.xml")
+    f.write(b"<order>")
+    f.flush()
+    try:
+        # A sweep through list + get: the listing shows the file, an exclusive read is refused.
+        assert [e["fileName"] for e in json.loads(b.invoke("list", b"", {}).data)] == ["order.xml"]
+        with pytest.raises(SmbError) as e:
+            b.invoke("get", b"", {"fileName": "order.xml", "exclusive": "true"})
+        assert e.value.kind is Kind.SHARING_VIOLATION
+        f.write(b"</order>")
+    finally:
+        f.close()
+    assert b.invoke("get", b"", {"fileName": "order.xml", "exclusive": "true"}).data == b"<order></order>"
+
+
 # ---------------------------------------------------------------- inbound
 
 

@@ -4,10 +4,14 @@ create never lets a partner see a half-written file: it writes a temp name with
 no sharing, then renames it to the final name. SMB rename is atomic and refuses
 to overwrite, so an existing file is never replaced. A temp file left over from
 a crash is overwritten; one another writer has open is refused by the server.
+
+get with exclusive=true never reads a half-written file: the open is refused
+while the partner still has it open. list never shows our own temp names.
 """
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import logging
 from dataclasses import dataclass, field
@@ -32,6 +36,7 @@ class OutputBinding:
     def __init__(self, cfg: Config, fs: FileSystem):
         self.cfg = cfg
         self.fs = fs
+        self._temp_glob = cfg.temp_file_name_pattern.replace("{name}", "*")
 
     def invoke(self, operation: str, data: bytes, md: dict[str, str]) -> Response:
         md = {k.lower(): v for k, v in md.items()}  # case-insensitive, as in Dapr
@@ -77,7 +82,7 @@ class OutputBinding:
 
     def _get(self, _data: bytes, md: dict[str, str]) -> Response:
         path = self._path(md)
-        content = self.fs.read(path)
+        content = self.fs.read(path, exclusive=_flag(md, "exclusive"))
         return Response(
             content, {"fileName": md["filename"], "size": str(len(content))}, "application/octet-stream"
         )
@@ -92,6 +97,7 @@ class OutputBinding:
                 "modTime": e.mtime.isoformat().replace("+00:00", "Z"),
             }
             for e in self.fs.listdir(path)
+            if e.is_dir or not fnmatch.fnmatchcase(e.name, self._temp_glob)
         ]
         return Response(json.dumps(body).encode(), {}, "application/json")
 
@@ -104,3 +110,10 @@ class OutputBinding:
         self.fs.makedirs(split(dst)[0])
         self.fs.rename(src, dst)
         return self._named(dst)
+
+
+def _flag(md: dict[str, str], key: str) -> bool:
+    value = md.get(key, "false").strip().lower()
+    if value not in ("true", "false"):
+        raise SmbError(Kind.INVALID, f'metadata {key} must be "true" or "false", got "{value}"')
+    return value == "true"
