@@ -19,8 +19,8 @@ follow Dapr's SFTP binding; [CONTRACT.md](CONTRACT.md) lists the shared names.
 | Operation | Behaviour |
 |---|---|
 | `create` | Write to a temp name, then rename to `fileName`. Never overwrites. Creates missing folders. |
-| `get` | Read `fileName`. |
-| `list` | List the folder in `fileName`, defaulting to `rootPath`. |
+| `get` | Read `fileName`. With `exclusive: "true"`, refused while someone else has it open. |
+| `list` | List the folder in `fileName`, defaulting to `rootPath`. Our own temp names are left out. |
 | `delete` | Delete `fileName`. |
 | `rename` | Rename `fileName` to `newFileName`. Never overwrites. |
 | input | Poll `inboundPath`, deliver each finished file, then move it to `processed/` (app answered OK) or `error/`. |
@@ -85,7 +85,8 @@ overwrite. Agree with the partner that they ignore `*.tmp` (or set
 an exclusive open. While the partner still has it open, the server refuses with
 `STATUS_SHARING_VIOLATION` and the file is tried again on the next poll. A
 partner that writes in several separate opens needs to write under a temp name
-and rename, like we do.
+and rename, like we do. A caller sweeping a folder with `list` and `get` gets the
+same protection by sending `exclusive: "true"` with `get`.
 
 **No file is lost.** A file stays in `inboundPath` until the app has answered,
 and is only then moved. After a crash or restart it is simply delivered again:
