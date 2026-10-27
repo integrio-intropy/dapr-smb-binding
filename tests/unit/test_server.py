@@ -108,6 +108,18 @@ def test_bad_config_fails_init(env):
     assert e.value.code() is grpc.StatusCode.INVALID_ARGUMENT
 
 
+@pytest.mark.parametrize("props", [PROPS, {**PROPS, "address": "1.2.3.4"}])
+def test_any_init_marks_the_sidecar_started(env, props):
+    # Failed or not, an Init proves daprd is running: idle exit counts it as seen.
+    _, ch, reg = env
+    assert not reg.started.is_set()
+    try:
+        init(ch, kind="input", props=props)
+    except grpc.RpcError:
+        pass
+    assert reg.started.is_set()
+
+
 def read_stream(ch):
     acks: queue.Queue = queue.Queue()
     requests = iter(acks.get, None)

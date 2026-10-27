@@ -51,14 +51,14 @@ every pod:
 "args": ["--health-port", "9464", "--exit-when-idle", "30s"]
 ```
 
-It watches the sidecar's HTTP port on `localhost` (3500, or `DAPR_HTTP_PORT`),
-which every container in a pod shares and which daprd listens on for as long
-as it runs. Once the sidecar has been up and then gone for 30 s, the binding
-shuts down cleanly and exits with 0. The timer only starts once the sidecar
-has been seen, and a restart within the timeout resets it.
-
-(Not the sidecar's connection to the binding's socket: daprd closes that after
-30 minutes without calls while it keeps running.)
+The sidecar counts as seen from its first `Init` on the binding's socket, and
+as running while it is connected to that socket or listening on its HTTP port
+on `localhost` (3500, or `DAPR_HTTP_PORT`). Neither is enough alone: daprd
+opens the port only once every component has loaded, so a Job with nothing to
+do can shut it down within a second, and it closes the socket connection after
+30 minutes without calls while it keeps running. Once the sidecar has been seen
+and then gone for 30 s, the binding shuts down cleanly and exits with 0. A
+restart within the timeout resets the timer.
 
 A **Deployment's pods turn it off** with this annotation on the pod template
 (see [`deployment.yaml`](deployment.yaml)), so an ordinary sidecar restart
