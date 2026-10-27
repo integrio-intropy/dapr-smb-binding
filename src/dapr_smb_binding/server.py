@@ -74,8 +74,11 @@ class Registry:
         self._lock = threading.Lock()
         self.outputs: dict[str, Instance] = {}
         self.inputs: dict[str, Instance] = {}
+        # Set on the sidecar's first Init, failed or not: proof that daprd is running (see idle).
+        self.started = threading.Event()
 
     def init(self, kind: str, name: str, props: dict[str, str]) -> None:
+        self.started.set()
         cfg, warns = parse(props)
         for w in warns:
             log.warning("%s: %s", name, w)

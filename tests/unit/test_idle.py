@@ -45,21 +45,50 @@ def test_main_refuses_to_start_on_an_invalid_timeout(monkeypatch, tmp_path):
     assert not (tmp_path / "smb.sock").exists()
 
 
-def test_sidecar_running_follows_the_port():
+def test_http_port_open_follows_the_port():
     srv = socket.socket()
     srv.bind(("127.0.0.1", 0))
     srv.listen()
     port = srv.getsockname()[1]
-    assert idle.sidecar_running(port)
+    assert idle.http_port_open(port)
     srv.close()
-    assert not idle.sidecar_running(port)
+    assert not idle.http_port_open(port)
 
 
-def watch_fires(states: list[bool], timeout: float) -> bool:
-    """Run watch() over per-second sidecar states; True if it shut down before they ran out."""
+SOCK = "/tmp/dapr-components-sockets/smb.sock"
+HEADER = "Num       RefCount Protocol Flags    Type St Inode Path\n"
+LISTENING = f"0000000000000000: 00000002 00000000 00010000 0001 01 3727884 {SOCK}\n"
+DAPRD = f"0000000000000000: 00000003 00000000 00000000 0001 03 3727887 {SOCK}\n"
+OTHER = "0000000000000000: 00000003 00000000 00000000 0001 03 3727890 /run/other.sock\n"
+UNNAMED = "0000000000000000: 00000003 00000000 00000000 0001 03 3727891\n"
+
+
+@pytest.mark.parametrize(
+    ("rows", "expected"),
+    [
+        ([LISTENING, DAPRD, UNNAMED], True),
+        ([LISTENING, OTHER, UNNAMED], False),  # nothing connected to our socket
+        ([], False),
+    ],
+)
+def test_sidecar_connected_reads_the_unix_socket_table(tmp_path, rows: list[str], expected: bool):
+    table = tmp_path / "unix"
+    table.write_text(HEADER + "".join(rows))
+    assert idle.sidecar_connected(SOCK, str(table)) is expected
+
+
+def test_sidecar_connected_is_false_without_the_table(tmp_path):
+    assert not idle.sidecar_connected(SOCK, str(tmp_path / "missing"))
+
+
+def watch_fires(states: list[bool], timeout: float, *, init_at: int | None = None) -> bool:
+    """Run watch() over per-second sidecar states; True if it shut down before they ran out.
+
+    init_at: the second the sidecar's first Init arrives, if it does.
+    """
     script = list(states)
     now = [0.0]
-    shutdown = threading.Event()
+    shutdown, started = threading.Event(), threading.Event()
     ran_out = []
 
     def running() -> bool:
@@ -68,9 +97,11 @@ def watch_fires(states: list[bool], timeout: float) -> bool:
             shutdown.set()
             return True
         now[0] += 1.0
+        if init_at is not None and now[0] >= init_at:
+            started.set()
         return script.pop(0)
 
-    idle.watch(timeout, shutdown, running=running, interval=0, clock=lambda: now[0])
+    idle.watch(timeout, shutdown, started, running, interval=0, clock=lambda: now[0])
     return not ran_out
 
 
@@ -87,3 +118,12 @@ def test_waits_for_the_sidecar_to_start_first():
 
 def test_a_restart_within_the_timeout_resets_the_clock():
     assert not watch_fires([UP, GONE, GONE, UP, GONE, GONE], timeout=3)
+
+
+def test_an_init_counts_as_seen_when_polling_missed_the_sidecar():
+    # A Job with nothing to do: daprd called Init, then came and went between two polls.
+    assert watch_fires([GONE] * 5, timeout=3, init_at=1)
+
+
+def test_waits_out_a_slow_start_after_init_while_the_sidecar_runs():
+    assert not watch_fires([GONE, UP, UP, UP, UP, UP], timeout=3, init_at=1)

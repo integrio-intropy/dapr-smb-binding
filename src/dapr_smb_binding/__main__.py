@@ -134,7 +134,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.health_port:
         serve_health(args.health_port, reg)
     if exit_when_idle:
-        threading.Thread(target=idle.watch, args=(exit_when_idle, shutdown), daemon=True).start()
+        threading.Thread(
+            target=idle.watch,
+            args=(exit_when_idle, shutdown, reg.started, lambda: idle.sidecar_running(path)),
+            daemon=True,
+        ).start()
     log.info(
         "dapr-smb-binding %s listening on %s (spec.type bindings.%s)", __version__, path, args.socket_name
     )
