@@ -26,7 +26,7 @@ dev = [
   "pytest>=8",
   # Exact: the generated stubs carry its version, and CI checks they are up to
   # date. Bump it together with `make proto`.
-  "grpcio-tools==1.84.0",
+  "grpcio-tools==1.84.1",
   "ruff>=0.6",
 ]
 
