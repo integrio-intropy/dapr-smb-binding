@@ -13,8 +13,8 @@ metadata:
     dapr.io/component-container: >
       {
         "name": "smb-binding",
-        "image": "harbor.intropy.io/platform/dapr-smb-binding:0.2.0",
-        "args": ["--health-port", "9464", "--exit-when-idle", "30s"],
+        "image": "harbor.intropy.io/platform/dapr-smb-binding:0.4.0",
+        "args": ["--health-port", "9464", "--exit-when-idle", "30s", "--exit-when-no-sidecar", "30s"],
         "env": [
           {
             "name": "SMB_BINDING_EXIT_WHEN_IDLE",
