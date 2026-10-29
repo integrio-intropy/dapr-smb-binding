@@ -106,20 +106,30 @@ def watch(
     running: Callable[[], bool],
     *,
     interval: float = 1.0,
+    start_wait: float = 0.0,
     clock: Callable[[], float] = time.monotonic,
 ) -> None:
     """Set shutdown once the sidecar has been up and then gone for timeout seconds.
 
-    started is set on the sidecar's first Init. Nothing happens until then or
-    until running() has been seen true, so a slow-starting daprd does not find
-    us already gone.
+    started is set on the sidecar's first Init. The idle timer waits for that or
+    for running() to be seen true, so a slow-starting daprd does not find us
+    already gone. If neither happens within start_wait seconds (0: wait forever),
+    daprd died before reaching us, typically because it looked for our socket
+    before we listened, and we exit too so the pod can fail and be retried.
     """
     seen = False
     gone_since: float | None = None
+    start = clock()
     while not shutdown.wait(interval):
         if running():
             seen, gone_since = True, None
-        elif seen or started.is_set():
+        elif not seen and not started.is_set():
+            if start_wait and clock() - start >= start_wait:
+                log.info(
+                    "the sidecar never connected within %.0fs; exiting so the pod can complete", start_wait
+                )
+                shutdown.set()
+        else:
             if gone_since is None:
                 gone_since = clock()
             elif clock() - gone_since >= timeout:

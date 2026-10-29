@@ -81,7 +81,9 @@ def test_sidecar_connected_is_false_without_the_table(tmp_path):
     assert not idle.sidecar_connected(SOCK, str(tmp_path / "missing"))
 
 
-def watch_fires(states: list[bool], timeout: float, *, init_at: int | None = None) -> bool:
+def watch_fires(
+    states: list[bool], timeout: float, *, init_at: int | None = None, start_wait: float = 0
+) -> bool:
     """Run watch() over per-second sidecar states; True if it shut down before they ran out.
 
     init_at: the second the sidecar's first Init arrives, if it does.
@@ -101,7 +103,7 @@ def watch_fires(states: list[bool], timeout: float, *, init_at: int | None = Non
             started.set()
         return script.pop(0)
 
-    idle.watch(timeout, shutdown, started, running, interval=0, clock=lambda: now[0])
+    idle.watch(timeout, shutdown, started, running, interval=0, start_wait=start_wait, clock=lambda: now[0])
     return not ran_out
 
 
@@ -127,3 +129,17 @@ def test_an_init_counts_as_seen_when_polling_missed_the_sidecar():
 
 def test_waits_out_a_slow_start_after_init_while_the_sidecar_runs():
     assert not watch_fires([GONE, UP, UP, UP, UP, UP], timeout=3, init_at=1)
+
+
+def test_exits_when_the_sidecar_never_connects_within_the_start_wait():
+    # daprd looked for our socket before we listened, and died before reaching us.
+    assert watch_fires([GONE] * 10, timeout=3, start_wait=5)
+
+
+def test_a_sidecar_seen_within_the_start_wait_is_left_to_the_idle_timer():
+    assert not watch_fires([GONE, GONE, UP, UP, UP, UP, UP, UP, UP, UP], timeout=3, start_wait=5)
+
+
+def test_an_init_within_the_start_wait_is_left_to_the_idle_timer():
+    # Seen through Init only: the idle timeout, not the start wait, decides.
+    assert not watch_fires([GONE, GONE], timeout=3, init_at=1, start_wait=1)

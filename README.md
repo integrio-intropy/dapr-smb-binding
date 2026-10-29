@@ -136,9 +136,10 @@ pod annotation `smb-binding.intropy.io/exit-when-idle: "off"`, which the
 component's container maps to `SMB_BINDING_EXIT_WHEN_IDLE`. One Component
 serves Jobs and Deployments alike, and forgetting the annotation is loud: a
 Deployment's binding restarts and alerts, rather than a Job hanging silently.
-Jobs also need `restartPolicy: OnFailure`: daprd looks for component sockets
-once, before the injected binding is listening, and exits; the restart in the
-same pod finds it. See
+Jobs run with `restartPolicy: Never` and a `backoffLimit`: daprd looks for
+component sockets once, sometimes before the injected binding is listening, and
+exits; `--exit-when-no-sidecar` then lets the binding exit too, and the Job
+retries in a fresh pod. See
 [examples/kubernetes](examples/kubernetes/README.md#jobs-and-cronjobs).
 
 | Flag | Default | |
@@ -147,6 +148,7 @@ same pod finds it. See
 | `--max-message-size` | `5242880` | Raise with the sidecar's `dapr.io/max-body-size`; over 4 MiB needs Dapr 1.19 or later. |
 | `--health-port` | `0` (off) | Serve `/healthz`. |
 | `--exit-when-idle` | off | Exit once the sidecar has been up and then gone this long, e.g. `30s`. Set it on the Component; a pod overrides it with `SMB_BINDING_EXIT_WHEN_IDLE`. |
+| `--exit-when-no-sidecar` | `1m` | With idle exit on, also exit if the sidecar never connects within this long, which is what happens when daprd dies before reaching the binding. `0` waits forever. |
 | `--log-level` | `info` | `debug`, `info`, `warning`, `error`. |
 
 | Environment | Default | |

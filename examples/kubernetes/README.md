@@ -21,16 +21,19 @@
    kubectl logs deploy/file-adapter -c daprd | grep -i smb
    ```
 
-## Startup order: daprd restarts once
+## Startup order: daprd may miss the binding
 
 daprd looks for component sockets once, about 20 ms after it starts, and the
-injector starts this binding after daprd. The binding takes a few hundred
-milliseconds to listen, so daprd exits with `couldn't find binding` and is
-restarted in the same pod; by then the binding is listening. A Deployment
-(`restartPolicy: Always`) recovers by itself. A Job needs
-`restartPolicy: OnFailure` and room for the restart in `backoffLimit` (5 is
-enough; with several binding instances starting at once daprd may need two
-restarts). With `restartPolicy: Never` the Job fails.
+injector starts this binding after daprd. When the binding is not listening
+yet, daprd exits with `couldn't find binding`. A Deployment
+(`restartPolicy: Always`) restarts daprd in the same pod, and by then the
+binding is listening.
+
+A Job runs with `restartPolicy: Never` and `backoffLimit: 5`. The binding
+exits once the sidecar has not connected within `--exit-when-no-sidecar`, the
+pod fails, and the Job retries in a fresh pod. Avoid `OnFailure`: an app that
+shuts its sidecar down and then exits non-zero is restarted in a pod whose
+daprd exited 0 and is never restarted, so every retry fails.
 
 The app receives inbound files as `POST /partner-share` (the component name)
 and must answer 2xx to have the file moved to `processed/`.
@@ -42,13 +45,13 @@ injector adds this binding to `spec.containers`. So when a Job's app finishes
 and shuts the sidecar down, the binding keeps running and the Job never
 completes.
 
-Run the Job with `restartPolicy: OnFailure` and `backoffLimit: 5` (see
-[Startup order](#startup-order-daprd-restarts-once)). The binding exits when
+Run the Job with `restartPolicy: Never` and `backoffLimit: 5` (see
+[Startup order](#startup-order-daprd-may-miss-the-binding)). The binding exits when
 the sidecar does, because [`component.yaml`](component.yaml) turns that on for
 every pod:
 
 ```json
-"args": ["--health-port", "9464", "--exit-when-idle", "30s"]
+"args": ["--health-port", "9464", "--exit-when-idle", "30s", "--exit-when-no-sidecar", "30s"]
 ```
 
 The sidecar counts as seen from its first `Init` on the binding's socket, and
@@ -58,7 +61,9 @@ opens the port only once every component has loaded, so a Job with nothing to
 do can shut it down within a second, and it closes the socket connection after
 30 minutes without calls while it keeps running. Once the sidecar has been seen
 and then gone for 30 s, the binding shuts down cleanly and exits with 0. A
-restart within the timeout resets the timer.
+restart within the timeout resets the timer. A sidecar that never connects
+within `--exit-when-no-sidecar` has died before reaching the binding, and the
+binding exits then too.
 
 A **Deployment's pods turn it off** with this annotation on the pod template
 (see [`deployment.yaml`](deployment.yaml)), so an ordinary sidecar restart

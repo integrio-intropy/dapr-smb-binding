@@ -85,6 +85,13 @@ def main(argv: list[str] | None = None) -> int:
         help="exit once the sidecar has been up and then gone this long, e.g. 30s; the Component's "
         f"default, which a pod overrides with {idle.TIMEOUT_ENV}",
     )
+    p.add_argument(
+        "--exit-when-no-sidecar",
+        type=duration,
+        default=60.0,
+        help="with idle exit on, also exit if the sidecar never connects within this long, which is "
+        "what happens when daprd dies before reaching us; 0 waits forever",
+    )
     p.add_argument("--log-level", default="info", choices=("debug", "info", "warning", "error"))
     p.add_argument("--version", action="version", version=__version__)
     args = p.parse_args(argv)
@@ -137,6 +144,7 @@ def main(argv: list[str] | None = None) -> int:
         threading.Thread(
             target=idle.watch,
             args=(exit_when_idle, shutdown, reg.started, lambda: idle.sidecar_running(path)),
+            kwargs={"start_wait": args.exit_when_no_sidecar},
             daemon=True,
         ).start()
     log.info(
