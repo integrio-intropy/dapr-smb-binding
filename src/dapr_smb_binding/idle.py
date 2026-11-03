@@ -90,8 +90,12 @@ def sidecar_connected(socket_path: str, table: str = PROC_NET_UNIX) -> bool:
     return False
 
 
+def dapr_http_port() -> int:
+    return int(os.environ.get("DAPR_HTTP_PORT") or DEFAULT_DAPR_HTTP_PORT)
+
+
 def http_port_open(port: int | None = None) -> bool:
-    port = port or int(os.environ.get("DAPR_HTTP_PORT") or DEFAULT_DAPR_HTTP_PORT)
+    port = port or dapr_http_port()
     try:
         socket.create_connection(("127.0.0.1", port), timeout=1).close()
         return True

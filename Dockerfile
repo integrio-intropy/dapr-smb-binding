@@ -86,4 +86,11 @@ ENV DAPR_COMPONENT_SOCKETS_FOLDER=/tmp/dapr-components-sockets \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
+# glibc otherwise raises its mmap threshold after the first large buffer is
+# freed, so later multi-MiB files land in per-thread heap arenas that never
+# shrink: 16 MiB writes grew the process ~8 MiB each until the 256 MiB limit
+# killed it. A fixed threshold keeps every buffer over 1 MiB in mmap, which is
+# returned to the system on free.
+ENV MALLOC_MMAP_THRESHOLD_=1048576
+
 ENTRYPOINT ["smb-binding"]
