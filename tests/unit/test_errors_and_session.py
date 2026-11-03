@@ -97,15 +97,28 @@ def test_keytab(fake, tmp_path):
     import spnego
 
     fs = smb.SmbFileSystem(
-        make_cfg(authMode="kerberos-keytab", keytab=KEYTAB_B64, password=None), component="astro"
+        make_cfg(authMode="kerberos-keytab", keytab=KEYTAB_B64, password=None), component="partner"
     )
     fs.ping()
     assert isinstance(fake.register_kwargs[0]["username"], spnego.KerberosKeytab)
-    keytab = tmp_path / "astro.keytab"
+    (keytab,) = tmp_path.glob("partner-*.keytab")
     assert keytab.read_bytes() == b"\x05\x02"
     assert keytab.stat().st_mode & 0o777 == 0o600
     fs.close()
     assert not keytab.exists()
+
+
+def test_init_again_keeps_the_new_instance_working(fake, tmp_path, monkeypatch):
+    """daprd calls Init again after it restarts; closing the old instance must not undo the new one."""
+    monkeypatch.setattr(kerberos, "_realms", {})
+    cfg = make_cfg(authMode="kerberos-keytab", keytab=KEYTAB_B64, password=None, realm="CORP.EXAMPLE.COM")
+    old = smb.SmbFileSystem(cfg, component="partner")
+    new = smb.SmbFileSystem(cfg, component="partner")
+    old.close()
+    assert "CORP.EXAMPLE.COM = {" in (tmp_path / "krb5.conf").read_text()
+    assert new._keytab.exists()
+    new.close()
+    assert "CORP.EXAMPLE.COM = {" not in (tmp_path / "krb5.conf").read_text()
 
 
 def test_reconnects_once_on_session_expiry(fake):
