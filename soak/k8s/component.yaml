@@ -1,0 +1,70 @@
+# The SMB binding as a production Component declares it, pointed at this cluster's file
+# server. The injected container is copied verbatim apart from the image, built locally from
+# the version under test.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: soak-smb-credentials
+  namespace: soak
+stringData:
+  password: "Svc!Passw0rd1"
+---
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: soak-share
+  namespace: soak
+  annotations:
+    dapr.io/component-container: >
+      {
+        "name": "smb-binding",
+        "image": "dapr-smb-binding:0.4.1-dev",
+        "imagePullPolicy": "Never",
+        "args": ["--health-port", "9464", "--exit-when-idle", "5s", "--exit-when-no-sidecar", "30s", "--max-message-size", "17825792"],
+        "env": [
+          {
+            "name": "SMB_BINDING_EXIT_WHEN_IDLE",
+            "valueFrom": { "fieldRef": { "fieldPath": "metadata.annotations['smb-binding.intropy.io/exit-when-idle']" } }
+          }
+        ],
+        "volumeMounts": [
+          { "name": "smb-binding-runtime", "mountPath": "/tmp/dapr-smb-binding" }
+        ],
+        "livenessProbe": {
+          "httpGet": { "path": "/healthz", "port": 9464 },
+          "periodSeconds": 15,
+          "failureThreshold": 3
+        },
+        "resources": {
+          "requests": { "cpu": "20m", "memory": "64Mi" },
+          "limits": { "memory": "256Mi" }
+        },
+        "securityContext": {
+          "runAsNonRoot": true,
+          "allowPrivilegeEscalation": false,
+          "readOnlyRootFilesystem": true,
+          "capabilities": { "drop": ["ALL"] },
+          "seccompProfile": { "type": "RuntimeDefault" }
+        }
+      }
+spec:
+  type: bindings.smb
+  version: v1
+  metadata:
+    - name: address
+      value: samba-dc.soak.svc.cluster.local
+    - name: share
+      value: exchange
+    - name: rootPath
+      value: /soak-root
+    - name: username
+      value: svc-intropy@LAB.TEST
+    - name: password
+      secretKeyRef:
+        name: soak-smb-credentials
+        key: password
+    - name: kdcs
+      value: samba-dc.soak.svc.cluster.local
+scopes:
+  - soak-job
+  - soak-service

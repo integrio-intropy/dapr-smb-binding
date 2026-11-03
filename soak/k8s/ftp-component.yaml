@@ -1,0 +1,49 @@
+# The FTP binding, with the injected container and metadata a production FTP port uses,
+# pointed at this cluster's FTP server. The image is built locally from the version under test.
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: soak-ftp
+  namespace: soak
+  annotations:
+    dapr.io/component-container: >
+      {
+        "name": "ftp-binding",
+        "image": "dapr-ftp-binding:soak",
+        "imagePullPolicy": "Never",
+        "args": ["-exit-when-idle", "5s", "-exit-when-no-sidecar", "30s", "-max-message-size", "17825792"],
+        "env": [
+          {
+            "name": "FTP_BINDING_EXIT_WHEN_IDLE",
+            "valueFrom": { "fieldRef": { "fieldPath": "metadata.annotations['ftp-binding.intropy.io/exit-when-idle']" } }
+          }
+        ],
+        "resources": {
+          "requests": { "cpu": "10m", "memory": "32Mi" },
+          "limits": { "memory": "128Mi" }
+        }
+      }
+spec:
+  type: bindings.ftp
+  version: v1
+  metadata:
+    - name: address
+      value: "ftp.soak.svc.cluster.local:21"
+    - name: username
+      secretKeyRef: { name: soak-ftp-credentials, key: username }
+    - name: password
+      secretKeyRef: { name: soak-ftp-credentials, key: password }
+    - name: rootPath
+      value: "./upload"
+    - name: tlsMode
+      value: "explicit"
+    # The test server's certificate is self-signed.
+    - name: insecureSkipVerify
+      value: "true"
+    - name: tempFileNamePattern
+      value: "{name}.tmp"
+    - name: createDirs
+      value: "true"
+scopes:
+  - soak-ftp-job
+  - soak-ftp-service
