@@ -14,7 +14,7 @@ from concurrent import futures
 import grpc
 from grpc_reflection.v1alpha import reflection
 
-from . import __version__, idle
+from . import __version__, idle, rejoin
 from ._proto import bindings_pb2 as pb
 from ._proto import bindings_pb2_grpc as pb_grpc
 from .config import Config, ConfigError, parse_duration
@@ -147,6 +147,11 @@ def main(argv: list[str] | None = None) -> int:
             kwargs={"start_wait": args.exit_when_no_sidecar},
             daemon=True,
         ).start()
+    threading.Thread(
+        target=rejoin.watch,
+        args=(f"bindings.{args.socket_name}", reg.started, shutdown, idle.dapr_http_port()),
+        daemon=True,
+    ).start()
     log.info(
         "dapr-smb-binding %s listening on %s (spec.type bindings.%s)", __version__, path, args.socket_name
     )

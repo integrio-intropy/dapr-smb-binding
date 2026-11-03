@@ -100,6 +100,23 @@ gets a fresh ticket.
 **Account lockout.** After a failed login the binding waits 60 s before trying
 again, so retries from the poll loop and the app cannot lock the account out.
 
+**A restarted binding is found again.** daprd connects to the binding's socket
+once, while it loads its components, and never reconnects. If the binding
+container restarts on its own (an OOM kill, a failed liveness probe) while
+daprd keeps running, daprd holds a dead connection and every call fails with
+`error reading from server: EOF`. So at startup the binding checks for that:
+when daprd is up, lists a `bindings.<socket-name>` component and has not called
+the binding's `Init` within 10 s, the binding asks daprd to shut down, and
+Kubernetes restarts it in the same pod, connected. A daprd that does not load
+the component is left alone.
+
+**Large files don't grow the process.** The image sets
+`MALLOC_MMAP_THRESHOLD_=1048576`. Without it glibc raises its mmap threshold
+after the first large buffer is freed, later buffers land in heap arenas that
+never shrink, and repeated 16 MiB files grow the process until the memory limit
+kills it. A 16 MiB file still peaks at around 200 MiB, so keep the container's
+limit at 256 MiB or more.
+
 ## Limits, on purpose
 
 Each of these is a known extension, to add when it is needed:
