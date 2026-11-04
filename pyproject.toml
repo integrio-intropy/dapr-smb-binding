@@ -13,8 +13,8 @@ authors = [{ name = "Integrio Intropy" }]
 dependencies = [
   "smbprotocol>=1.17,<2",
   "pyspnego>=0.12,<1",
-  "grpcio>=1.84,<2",
-  "grpcio-reflection>=1.84,<2",
+  "grpcio>=1.85.1,<2",
+  "grpcio-reflection>=1.85.1,<2",
   "protobuf>=7.35.1,<8",
 ]
 
