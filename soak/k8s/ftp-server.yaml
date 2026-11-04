@@ -1,0 +1,78 @@
+# The FTP server for the FTP binding: ProFTPD from the binding's own integration tests, with
+# explicit TLS (AUTH TLS), as an FTPS server would run. Its data is an emptyDir, so a restart
+# empties it; the component creates missing folders (createDirs).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: soak-ftp-credentials
+  namespace: soak
+stringData:
+  username: ftpuser
+  password: ftppass
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ftp
+  namespace: soak
+spec:
+  selector: { app: ftp-server }
+  # The control port and the passive range: the binding opens data connections to the
+  # address it connected to, so the passive ports go through the Service too.
+  ports:
+    - { name: ftp, port: 21 }
+    - { name: pasv-0, port: 30000 }
+    - { name: pasv-1, port: 30001 }
+    - { name: pasv-2, port: 30002 }
+    - { name: pasv-3, port: 30003 }
+    - { name: pasv-4, port: 30004 }
+    - { name: pasv-5, port: 30005 }
+    - { name: pasv-6, port: 30006 }
+    - { name: pasv-7, port: 30007 }
+    - { name: pasv-8, port: 30008 }
+    - { name: pasv-9, port: 30009 }
+    - { name: pasv-10, port: 30010 }
+    - { name: pasv-11, port: 30011 }
+    - { name: pasv-12, port: 30012 }
+    - { name: pasv-13, port: 30013 }
+    - { name: pasv-14, port: 30014 }
+    - { name: pasv-15, port: 30015 }
+    - { name: pasv-16, port: 30016 }
+    - { name: pasv-17, port: 30017 }
+    - { name: pasv-18, port: 30018 }
+    - { name: pasv-19, port: 30019 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ftp-server
+  namespace: soak
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: ftp-server }
+  template:
+    metadata:
+      labels: { app: ftp-server }
+    spec:
+      containers:
+        - name: proftpd
+          image: soak-proftpd:1
+          imagePullPolicy: Never
+          env:
+            - { name: MODE, value: explicit }
+            - { name: PASV_MIN, value: "30000" }
+            - { name: PASV_MAX, value: "30019" }
+            - { name: MAX_CLIENTS, value: "50" }
+            - name: MASQUERADE
+              valueFrom: { fieldRef: { fieldPath: status.podIP } }
+            - name: FTP_USER
+              valueFrom: { secretKeyRef: { name: soak-ftp-credentials, key: username } }
+            - name: FTP_PASS
+              valueFrom: { secretKeyRef: { name: soak-ftp-credentials, key: password } }
+          ports:
+            - containerPort: 21
+          readinessProbe:
+            tcpSocket: { port: 21 }
+            periodSeconds: 5

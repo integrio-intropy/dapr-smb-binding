@@ -153,10 +153,11 @@ pod annotation `smb-binding.intropy.io/exit-when-idle: "off"`, which the
 component's container maps to `SMB_BINDING_EXIT_WHEN_IDLE`. One Component
 serves Jobs and Deployments alike, and forgetting the annotation is loud: a
 Deployment's binding restarts and alerts, rather than a Job hanging silently.
-Jobs run with `restartPolicy: Never` and a `backoffLimit`: daprd looks for
-component sockets once, sometimes before the injected binding is listening, and
-exits; `--exit-when-no-sidecar` then lets the binding exit too, and the Job
-retries in a fresh pod. See
+Jobs run with `restartPolicy: OnFailure` and a `backoffLimit`: daprd looks for
+component sockets once, usually before the injected binding is listening, and
+exits; Kubernetes restarts it in the same pod, where the binding is ready. The
+app must leave daprd running when it fails, or its retry finds no sidecar
+(Intropy.Framework: `INTROPY_JOB_SIDECAR_SHUTDOWN=OnSuccess`). See
 [examples/kubernetes](examples/kubernetes/README.md#jobs-and-cronjobs).
 
 | Flag | Default | |

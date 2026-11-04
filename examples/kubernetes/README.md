@@ -29,11 +29,19 @@ yet, daprd exits with `couldn't find binding`. A Deployment
 (`restartPolicy: Always`) restarts daprd in the same pod, and by then the
 binding is listening.
 
-A Job runs with `restartPolicy: Never` and `backoffLimit: 5`. The binding
-exits once the sidecar has not connected within `--exit-when-no-sidecar`, the
-pod fails, and the Job retries in a fresh pod. Avoid `OnFailure`: an app that
-shuts its sidecar down and then exits non-zero is restarted in a pod whose
-daprd exited 0 and is never restarted, so every retry fails.
+A Job runs with `restartPolicy: OnFailure` and `backoffLimit: 5`, for the
+same reason: daprd is restarted in the same pod. Don't use `Never`: every
+retry is a fresh pod where daprd starts before the binding again, and in AKS
+the binding loses that race almost every time, so the Job runs out of
+retries.
+
+`OnFailure` needs an app that leaves daprd running when it exits non-zero.
+daprd that was shut down exits 0, Kubernetes does not restart a container that
+exited 0, and the app's retry then waits for a sidecar that never comes back.
+Intropy.Framework jobs do this with `INTROPY_JOB_SIDECAR_SHUTDOWN=OnSuccess`
+(2.1.0-beta.9 or later). `--exit-when-no-sidecar` covers the case where daprd
+never connects at all: the binding exits, and the pod fails instead of
+hanging.
 
 The app receives inbound files as `POST /partner-share` (the component name)
 and must answer 2xx to have the file moved to `processed/`.
@@ -45,7 +53,7 @@ injector adds this binding to `spec.containers`. So when a Job's app finishes
 and shuts the sidecar down, the binding keeps running and the Job never
 completes.
 
-Run the Job with `restartPolicy: Never` and `backoffLimit: 5` (see
+Run the Job with `restartPolicy: OnFailure` and `backoffLimit: 5` (see
 [Startup order](#startup-order-daprd-may-miss-the-binding)). The binding exits when
 the sidecar does, because [`component.yaml`](component.yaml) turns that on for
 every pod:

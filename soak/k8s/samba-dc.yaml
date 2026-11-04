@@ -1,0 +1,101 @@
+# The file server, set up as a test cluster's Samba DC:
+# a Samba AD DC that refuses NTLM and requires SMB 3 with encryption, with a cifs/ service
+# principal for its cluster DNS name. Two differences, both on purpose:
+#   - its domain and share live on a volume, so deleting the pod is a server restart rather
+#     than a new domain and an empty share;
+#   - tickets last 1 hour (Samba's default is 10), so long-running pods renew many times.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: samba-dc-entrypoint
+  namespace: soak
+data:
+  entrypoint.sh: |
+    #!/bin/sh
+    set -eu
+    REALM=LAB.TEST
+    FQDN="samba-dc.${POD_NAMESPACE}.svc.cluster.local"
+    if [ ! -f /var/lib/samba/private/sam.ldb ]; then
+      rm -f /etc/samba/smb.conf
+      samba-tool domain provision \
+        --realm="$REALM" --domain=LAB --server-role=dc \
+        --dns-backend=SAMBA_INTERNAL --adminpass='Adm1n!Passw0rd' \
+        --host-name=dc --use-rfc2307 \
+        --option="server smb encrypt = required" \
+        --option="server min protocol = SMB3" \
+        --option="posix:eadb = /var/lib/samba/private/eadb.tdb" \
+        --option="xattr_tdb:file = /var/lib/samba/private/xattr.tdb" \
+        --option="vfs objects = dfs_samba4 acl_xattr xattr_tdb"
+      sed -i 's/^\[global\]$/[global]\n\tntlm auth = disabled\n\tkdc:user ticket lifetime = 1\n\tkdc:service ticket lifetime = 1/' /etc/samba/smb.conf
+      mkdir -p /srv/exchange
+      chmod 0777 /srv/exchange
+      cat >> /etc/samba/smb.conf <<CONF
+
+    [exchange]
+        path = /srv/exchange
+        read only = no
+        smb encrypt = required
+        inherit permissions = yes
+        force create mode = 0666
+        force directory mode = 0777
+    CONF
+      samba-tool user create svc-intropy 'Svc!Passw0rd1'
+      samba-tool user setexpiry svc-intropy --noexpiry
+      samba-tool spn add "cifs/$FQDN" 'DC$'
+    fi
+    cp /var/lib/samba/private/krb5.conf /etc/krb5.conf
+    exec samba --foreground --no-process-group --debug-stdout
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: samba-dc
+  namespace: soak
+spec:
+  selector: { app: samba-dc }
+  ports:
+    - { name: kerberos-tcp, port: 88, protocol: TCP }
+    - { name: kerberos-udp, port: 88, protocol: UDP }
+    - { name: smb, port: 445, protocol: TCP }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: samba-dc
+  namespace: soak
+spec:
+  serviceName: samba-dc
+  replicas: 1
+  selector:
+    matchLabels: { app: samba-dc }
+  template:
+    metadata:
+      labels: { app: samba-dc }
+    spec:
+      containers:
+        - name: samba
+          image: soak-samba-dc:dev
+          imagePullPolicy: Never
+          command: ["/bin/sh", "/opt/soak/entrypoint.sh"]
+          env:
+            - name: POD_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+          readinessProbe:
+            exec:
+              command: ["bash", "-c", "</dev/tcp/127.0.0.1/445 && </dev/tcp/127.0.0.1/88"]
+            periodSeconds: 3
+          volumeMounts:
+            - { name: entrypoint, mountPath: /opt/soak }
+            - { name: data, mountPath: /var/lib/samba, subPath: lib }
+            - { name: data, mountPath: /etc/samba, subPath: etc }
+            - { name: data, mountPath: /srv/exchange, subPath: exchange }
+      volumes:
+        - name: entrypoint
+          configMap: { name: samba-dc-entrypoint }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests: { storage: 2Gi }

@@ -1,0 +1,48 @@
+# The Job workload: the pod spec of the production CronJobs (restartPolicy OnFailure,
+# backoffLimit 5, INTROPY_JOB_SIDECAR_SHUTDOWN=OnSuccess). The driver fills in NAME, APP,
+# KIND, COMPONENT and FAIL_FIRST and creates one Job per run.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: NAME
+  namespace: soak
+  labels: { app: APP, soak.intropy.io/fail-first: "FAIL_FIRST" }
+spec:
+  backoffLimit: 5
+  template:
+    metadata:
+      labels: { app: APP }
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: APP
+        dapr.io/enable-app-health-check: "false"
+        dapr.io/graceful-shutdown-seconds: "10"
+        dapr.io/inject-pluggable-components: "true"
+        dapr.io/max-body-size: "17Mi"
+    spec:
+      containers:
+        - name: soak-job
+          image: smb-soak-app:dev
+          imagePullPolicy: Never
+          args: ["job"]
+          env:
+            - { name: INTROPY_JOB_SIDECAR_SHUTDOWN, value: OnSuccess }
+            - { name: Dapr__MaxReceiveMessageBytes, value: "17825792" }
+            - { name: SOAK_FAIL_FIRST, value: "FAIL_FIRST" }
+            - { name: SOAK_KIND, value: KIND }
+            - { name: SOAK_BINDING, value: COMPONENT }
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+          # 512Mi, not the components' 256Mi: at 256Mi .NET throws OutOfMemoryException on
+          # 16 MiB files, which is a separate finding and would hide what the binding does.
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }
+          volumeMounts:
+            - { name: state, mountPath: /state }
+      restartPolicy: OnFailure
+      volumes:
+        - name: state
+          emptyDir: {}
+        - name: smb-binding-runtime
+          emptyDir: { medium: Memory, sizeLimit: 1Mi }

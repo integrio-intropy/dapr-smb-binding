@@ -1,0 +1,39 @@
+# The Deployment workload, as production loaders run: restartPolicy Always, and the binding
+# never idles out (ftp-binding.intropy.io/exit-when-idle: "off").
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: soak-ftp-service
+  namespace: soak
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: soak-ftp-service }
+  template:
+    metadata:
+      labels: { app: soak-ftp-service }
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: soak-ftp-service
+        dapr.io/enable-app-health-check: "false"
+        dapr.io/graceful-shutdown-seconds: "10"
+        dapr.io/inject-pluggable-components: "true"
+        dapr.io/max-body-size: "17Mi"
+        ftp-binding.intropy.io/exit-when-idle: "off"
+    spec:
+      containers:
+        - name: soak-service
+          image: smb-soak-app:dev
+          imagePullPolicy: Never
+          args: ["service"]
+          env:
+            - { name: Dapr__MaxReceiveMessageBytes, value: "17825792" }
+            - { name: SOAK_KIND, value: ftp }
+            - { name: SOAK_BINDING, value: soak-ftp }
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+          # 512Mi, not the components' 256Mi: at 256Mi .NET throws OutOfMemoryException on
+          # 16 MiB files, which is a separate finding and would hide what the binding does.
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }

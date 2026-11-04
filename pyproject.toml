@@ -59,3 +59,4 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S"]
+"soak/**" = ["S"]   # drives kubectl and docker, and picks faults at random
