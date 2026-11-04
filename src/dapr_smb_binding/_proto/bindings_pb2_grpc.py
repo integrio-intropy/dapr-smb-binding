@@ -6,7 +6,7 @@ import warnings
 from dapr_smb_binding._proto import bindings_pb2 as dapr_dot_proto_dot_components_dot_v1_dot_bindings__pb2
 from dapr_smb_binding._proto import common_pb2 as dapr_dot_proto_dot_components_dot_v1_dot_common__pb2
 
-GRPC_GENERATED_VERSION = '1.84.0'
+GRPC_GENERATED_VERSION = '1.85.1'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
