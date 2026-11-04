@@ -3,7 +3,7 @@
 Tickets never touch disk: pyspnego gets a TGT into a private MEMORY ccache at
 every SMB session setup, from the password or the keytab. What is process-wide
 is the krb5 config file, so every component instance adds its realm to one
-generated file.
+generated file, under a key of its own.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ RUNTIME_DIR_ENV = "SMB_BINDING_RUNTIME_DIR"
 DEFAULT_RUNTIME_DIR = "/tmp/dapr-smb-binding"  # noqa: S108 - an emptyDir (medium: Memory) in Kubernetes
 
 _lock = threading.Lock()
-# component name -> (realm, kdcs, file server)
+# instance key -> (realm, kdcs, file server)
 _realms: dict[str, tuple[str, tuple[str, ...], str]] = {}
 
 
@@ -49,15 +49,15 @@ def render(realms: list[tuple[str, tuple[str, ...], str]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def register(component: str, realm: str, kdcs: tuple[str, ...], server: str) -> None:
+def register(key: str, realm: str, kdcs: tuple[str, ...], server: str) -> None:
     with _lock:
-        _realms[component] = (realm, kdcs, server)
+        _realms[key] = (realm, kdcs, server)
         _write()
 
 
-def unregister(component: str) -> None:
+def unregister(key: str) -> None:
     with _lock:
-        if _realms.pop(component, None):
+        if _realms.pop(key, None):
             _write()
 
 
@@ -72,9 +72,9 @@ def _write() -> None:
     os.environ.setdefault("KRB5CCNAME", "MEMORY:dapr-smb-binding")
 
 
-def write_keytab(component: str, data: bytes) -> pathlib.Path:
+def write_keytab(key: str, data: bytes) -> pathlib.Path:
     """Write the keytab, readable by this process only. Use a memory-backed emptyDir in Kubernetes."""
-    safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in component) or "default"
+    safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in key) or "default"
     path = runtime_dir() / f"{safe}.keytab"
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "wb") as f:

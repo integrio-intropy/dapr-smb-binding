@@ -10,6 +10,7 @@ fresh ticket.
 from __future__ import annotations
 
 import datetime as dt
+import itertools
 import logging
 import threading
 import time
@@ -27,6 +28,11 @@ log = logging.getLogger(__name__)
 # poll loop and the app cannot lock the account out in AD.
 AUTH_BACKOFF = 60.0
 
+# Numbers each instance, so a component initialised again (a daprd restart, a hot
+# reload) gets its own realm entry and keytab, and closing the old instance
+# afterwards does not remove the new one's.
+_instances = itertools.count(1)
+
 
 class SmbFileSystem:
     def __init__(
@@ -41,10 +47,11 @@ class SmbFileSystem:
         self._auth_error: SmbError | None = None
         self._auth_retry_at = 0.0
         self._keytab = None
+        self._key = f"{component}-{next(_instances)}"
 
         kerberos.check_gssapi()
         if cfg.realm:
-            kerberos.register(component, cfg.realm, cfg.kdcs, cfg.server)
+            kerberos.register(self._key, cfg.realm, cfg.kdcs, cfg.server)
         principal = cfg.username
         if "\\" in principal:  # DOMAIN\user -> user
             principal = principal.split("\\", 1)[1]
@@ -64,7 +71,7 @@ class SmbFileSystem:
         if cfg.auth_mode is AuthMode.KERBEROS_KEYTAB:
             import spnego
 
-            self._keytab = kerberos.write_keytab(component, cfg.keytab)
+            self._keytab = kerberos.write_keytab(self._key, cfg.keytab)
             self._kw |= {
                 "username": spnego.KerberosKeytab(str(self._keytab), principal or None),
                 "password": None,
@@ -117,7 +124,7 @@ class SmbFileSystem:
     def close(self) -> None:
         with self._lock:
             self._drop_locked()
-        kerberos.unregister(self.component)
+        kerberos.unregister(self._key)
         if self._keytab:
             self._keytab.unlink(missing_ok=True)
 
