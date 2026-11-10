@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import socket
+import sys
+import tempfile
 import threading
+from concurrent import futures
 
+import grpc
 import pytest
 
 from dapr_smb_binding import __main__ as entrypoint
@@ -67,6 +71,9 @@ UNNAMED = "0000000000000000: 00000003 00000000 00000000 0001 03 3727891\n"
     ("rows", "expected"),
     [
         ([LISTENING, DAPRD, UNNAMED], True),
+        # As gRPC binds "unix:///tmp/...": the table keeps the extra slashes.
+        ([LISTENING.replace(SOCK, "//" + SOCK), DAPRD.replace(SOCK, "//" + SOCK)], True),
+        ([LISTENING, OTHER.replace("/run", "///run")], False),
         ([LISTENING, OTHER, UNNAMED], False),  # nothing connected to our socket
         ([], False),
     ],
@@ -143,3 +150,22 @@ def test_a_sidecar_seen_within_the_start_wait_is_left_to_the_idle_timer():
 def test_an_init_within_the_start_wait_is_left_to_the_idle_timer():
     # Seen through Init only: the idle timeout, not the start wait, decides.
     assert not watch_fires([GONE, GONE], timeout=3, init_at=1, start_wait=1)
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc/net/unix")
+def test_sidecar_connected_sees_a_real_grpc_client():
+    # The socket bound the way __main__ binds it, and a client connected the way
+    # daprd connects: what the table really shows, not what a test row assumes.
+    sockdir = tempfile.mkdtemp(prefix="smb", dir="/tmp")  # noqa: S108
+    path = f"{sockdir}/smb.sock"
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=1))
+    server.add_insecure_port(f"unix://{path}")
+    server.start()
+    try:
+        assert not idle.sidecar_connected(path)
+        channel = grpc.insecure_channel(f"unix://{path}")
+        grpc.channel_ready_future(channel).result(timeout=5)
+        assert idle.sidecar_connected(path)
+        channel.close()
+    finally:
+        server.stop(0).wait()
