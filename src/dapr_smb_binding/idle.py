@@ -77,13 +77,25 @@ def sidecar_running(socket_path: str, port: int | None = None) -> bool:
     return sidecar_connected(socket_path) or http_port_open(port)
 
 
+def same_socket(listed: str, socket_path: str) -> bool:
+    """Whether a path in the table is our socket.
+
+    The table shows the path exactly as it was bound, and gRPC binds
+    "unix:///tmp/x.sock" as "///tmp/x.sock". Comparing it as is to "/tmp/x.sock"
+    never matched, so the sidecar's connection never counted and only its HTTP
+    port kept us alive: a daprd that took longer than the idle timeout between
+    its first Init and opening that port saw us exit in the middle of loading us.
+    """
+    return os.path.normpath("/" + listed.lstrip("/")) == os.path.normpath("/" + socket_path.lstrip("/"))
+
+
 def sidecar_connected(socket_path: str, table: str = PROC_NET_UNIX) -> bool:
     try:
         with open(table) as f:
             next(f)  # header
             for line in f:
                 fields = line.split()
-                if len(fields) == 8 and fields[7] == socket_path and fields[5] == CONNECTED:
+                if len(fields) == 8 and fields[5] == CONNECTED and same_socket(fields[7], socket_path):
                     return True
     except OSError:  # not Linux: the HTTP port alone
         pass
