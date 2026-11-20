@@ -32,7 +32,6 @@ spec:
             - name: smb-binding
               image: harbor.intropy.io/platform/dapr-smb-binding:0.4.0
               restartPolicy: Always
-              # No --exit-when-idle: the kubelet stops a native sidecar.
               args: ["--health-port", "9464"]
               # daprd reads the socket folder once, at startup. /healthz answers
               # only once the binding listens on its socket, so the probe holds

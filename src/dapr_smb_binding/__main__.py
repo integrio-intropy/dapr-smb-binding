@@ -14,10 +14,10 @@ from concurrent import futures
 import grpc
 from grpc_reflection.v1alpha import reflection
 
-from . import __version__, idle, rejoin
+from . import __version__, rejoin
 from ._proto import bindings_pb2 as pb
 from ._proto import bindings_pb2_grpc as pb_grpc
-from .config import Config, ConfigError, parse_duration
+from .config import Config
 from .fs import FileSystem
 from .server import InputService, OutputService, Registry
 
@@ -54,20 +54,8 @@ def serve_health(port: int, reg: Registry) -> None:
     threading.Thread(target=srv.serve_forever, daemon=True).start()
 
 
-def duration(s: str) -> float:
-    try:
-        return parse_duration("duration", s, 0.0)
-    except ConfigError as e:
-        raise argparse.ArgumentTypeError(str(e)) from None
-
-
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(
-        prog="smb-binding",
-        description=__doc__,
-        epilog=f"{idle.TIMEOUT_ENV}: the pod's override of --exit-when-idle, e.g. 30s, or {idle.OFF}; "
-        "set it to off for a Deployment's pod.",
-    )
+    p = argparse.ArgumentParser(prog="smb-binding", description=__doc__)
     p.add_argument(
         "--socket-name", default="smb", help="socket file name without .sock; spec.type is bindings.<name>"
     )
@@ -78,20 +66,6 @@ def main(argv: list[str] | None = None) -> int:
         help="maximum gRPC message in bytes; raise with the sidecar's dapr.io/max-body-size",
     )
     p.add_argument("--health-port", type=int, default=0, help="serve /healthz on this port; 0 = off")
-    p.add_argument(
-        "--exit-when-idle",
-        type=duration,
-        default=0.0,
-        help="exit once the sidecar has been up and then gone this long, e.g. 30s; the Component's "
-        f"default, which a pod overrides with {idle.TIMEOUT_ENV}",
-    )
-    p.add_argument(
-        "--exit-when-no-sidecar",
-        type=duration,
-        default=60.0,
-        help="with idle exit on, also exit if the sidecar never connects within this long, which is "
-        "what happens when daprd dies before reaching us; 0 waits forever",
-    )
     p.add_argument("--log-level", default="info", choices=("debug", "info", "warning", "error"))
     p.add_argument("--version", action="version", version=__version__)
     args = p.parse_args(argv)
@@ -102,12 +76,6 @@ def main(argv: list[str] | None = None) -> int:
     # smbprotocol logs every SMB message at INFO.
     for noisy in ("smbprotocol", "smbclient", "spnego"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
-
-    try:
-        exit_when_idle = idle.timeout(args.exit_when_idle)
-    except ConfigError as e:
-        log.error("%s", e)
-        return 2
 
     folder = os.environ.get(SOCKET_FOLDER_ENV) or DEFAULT_SOCKET_FOLDER
     path = os.path.join(folder, f"{args.socket_name}.sock")
@@ -140,16 +108,9 @@ def main(argv: list[str] | None = None) -> int:
         os.umask(old_umask)
     if args.health_port:
         serve_health(args.health_port, reg)
-    if exit_when_idle:
-        threading.Thread(
-            target=idle.watch,
-            args=(exit_when_idle, shutdown, reg.started, lambda: idle.sidecar_running(path)),
-            kwargs={"start_wait": args.exit_when_no_sidecar},
-            daemon=True,
-        ).start()
     threading.Thread(
         target=rejoin.watch,
-        args=(f"bindings.{args.socket_name}", reg.started, shutdown, idle.dapr_http_port()),
+        args=(f"bindings.{args.socket_name}", reg.started, shutdown, rejoin.dapr_http_port()),
         daemon=True,
     ).start()
     log.info(

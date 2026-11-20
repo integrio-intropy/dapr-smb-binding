@@ -74,7 +74,7 @@ class Registry:
         self._lock = threading.Lock()
         self.outputs: dict[str, Instance] = {}
         self.inputs: dict[str, Instance] = {}
-        # Set on the sidecar's first Init, failed or not: proof that daprd is running (see idle).
+        # Set on the sidecar's first Init, failed or not: proof that daprd is connected to this process (see rejoin).
         self.started = threading.Event()
 
     def init(self, kind: str, name: str, props: dict[str, str]) -> None:

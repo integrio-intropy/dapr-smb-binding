@@ -162,23 +162,19 @@ the Job can use `restartPolicy: Never`. See
 [examples/kubernetes/cronjob.yaml](examples/kubernetes/cronjob.yaml). Needs
 Kubernetes 1.29 or later.
 
-A binding that Dapr injects into a Job has to exit by itself instead
-(`--exit-when-idle`), because Dapr adds it as an ordinary container that
-nothing stops when the app is done. That still works, with more moving parts;
-see [examples/kubernetes](examples/kubernetes/README.md#if-the-binding-is-injected-into-a-job-instead).
+Do not let Dapr inject the binding into a Job
+(`dapr.io/inject-pluggable-components: "true"`): Dapr adds it as an ordinary
+container that nothing stops when the app is done, so the pod never completes.
+Earlier versions had `--exit-when-idle` for that case; it was removed in
+favour of the native sidecar, and a binding started with the flag now fails at
+start-up.
 
 | Flag | Default | |
 |---|---|---|
 | `--socket-name` | `smb` | Socket file name; `spec.type` is `bindings.<name>`. |
 | `--max-message-size` | `5242880` | Raise with the sidecar's `dapr.io/max-body-size`; over 4 MiB needs Dapr 1.19 or later. |
 | `--health-port` | `0` (off) | Serve `/healthz`. |
-| `--exit-when-idle` | off | Exit once the sidecar has been up and then gone this long, e.g. `30s`. Only for a binding that Dapr injects into a Job; leave it off for Deployments and for a binding that runs as a native sidecar. A pod overrides it with `SMB_BINDING_EXIT_WHEN_IDLE`. |
-| `--exit-when-no-sidecar` | `1m` | With idle exit on, also exit if the sidecar never connects within this long, which is what happens when daprd dies before reaching the binding. `0` waits forever. |
 | `--log-level` | `info` | `debug`, `info`, `warning`, `error`. |
-
-| Environment | Default | |
-|---|---|---|
-| `SMB_BINDING_EXIT_WHEN_IDLE` | `--exit-when-idle` | The pod's override, from the annotation `smb-binding.intropy.io/exit-when-idle`: a duration, or `off` for Deployments. Unset or empty keeps the flag. Anything else stops the binding at startup. |
 
 ## Development
 

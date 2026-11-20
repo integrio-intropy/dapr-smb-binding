@@ -110,7 +110,7 @@ def test_bad_config_fails_init(env):
 
 @pytest.mark.parametrize("props", [PROPS, {**PROPS, "address": "1.2.3.4"}])
 def test_any_init_marks_the_sidecar_started(env, props):
-    # Failed or not, an Init proves daprd is running: idle exit counts it as seen.
+    # Failed or not, an Init proves daprd is connected: rejoin then leaves it alone.
     _, ch, reg = env
     assert not reg.started.is_set()
     try:

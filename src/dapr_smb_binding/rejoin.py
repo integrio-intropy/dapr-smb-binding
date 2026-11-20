@@ -22,12 +22,20 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 import urllib.request
 from collections.abc import Callable
 
 log = logging.getLogger(__name__)
+
+# Where the injector puts daprd's HTTP API unless DAPR_HTTP_PORT says otherwise.
+DEFAULT_DAPR_HTTP_PORT = 3500
+
+
+def dapr_http_port() -> int:
+    return int(os.environ.get("DAPR_HTTP_PORT") or DEFAULT_DAPR_HTTP_PORT)
 
 
 def watch(

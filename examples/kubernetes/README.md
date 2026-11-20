@@ -58,8 +58,8 @@ The kubelet then does the rest:
 - **Start order.** daprd starts only when the binding's startup probe has
   passed, so it finds the socket on its first start.
 - **Completion.** When the app container exits, the kubelet stops daprd and
-  the binding. The pod's result is the app's exit code. The binding needs no
-  `--exit-when-idle`, and the app does not need to call `/v1.0/shutdown`.
+  the binding. The pod's result is the app's exit code. The app does not need
+  to call `/v1.0/shutdown`.
 - **Restarts.** A native sidecar is restarted whatever the pod's
   `restartPolicy`, so `Never` is fine for the Job.
 
@@ -71,60 +71,11 @@ If daprd still restarts once at the start of a pod, check its log for an
 `Init` timeout before suspecting the start order: see `initTimeout` in
 [`component.yaml`](component.yaml).
 
-### If the binding is injected into a Job instead
+### Do not inject the binding into a Job
 
-Use this only where native sidecars are not available.
-
-A pod is only `Succeeded` once **every** container has stopped, and the Dapr
-injector adds this binding to `spec.containers`. So when a Job's app finishes
-and shuts the sidecar down, the binding keeps running and the Job never
-completes.
-
-Run the Job with `restartPolicy: OnFailure` and `backoffLimit: 5`, so that a
-daprd that missed the binding's socket is restarted in the same pod. Don't use
-`Never` here: every retry is a fresh pod where daprd starts before the binding
-again. `OnFailure` needs an app that leaves daprd running when it exits
-non-zero: a daprd that was shut down exits 0, Kubernetes does not restart a
-container that exited 0, and the app's retry then waits for a sidecar that
-never comes back (Intropy.Framework: `INTROPY_JOB_SIDECAR_SHUTDOWN=OnSuccess`,
-2.1.0-beta.9 or later).
-
-Let the binding exit when the sidecar does, with these arguments in the
-`dapr.io/component-container` annotation:
-
-```json
-"args": ["--health-port", "9464", "--exit-when-idle", "30s", "--exit-when-no-sidecar", "30s"]
-```
-
-The sidecar counts as seen from its first `Init` on the binding's socket, and
-as running while it is connected to that socket or listening on its HTTP port
-on `localhost` (3500, or `DAPR_HTTP_PORT`). Neither is enough alone: daprd
-opens the port only once every component has loaded, so a Job with nothing to
-do can shut it down within a second, and it closes the socket connection after
-30 minutes without calls while it keeps running. Once the sidecar has been seen
-and then gone for 30 s, the binding shuts down cleanly and exits with 0. A
-restart within the timeout resets the timer. A sidecar that never connects
-within `--exit-when-no-sidecar` has died before reaching the binding, and the
-binding exits then too, so the pod fails instead of hanging.
-
-The arguments are the Component's, so every pod that injects it gets them. A
-**Deployment's pods must turn idle exit off**, or an ordinary sidecar restart
-takes the binding down. Map a pod annotation to `SMB_BINDING_EXIT_WHEN_IDLE`
-in the same `dapr.io/component-container` annotation:
-
-```json
-"env": [{
-  "name": "SMB_BINDING_EXIT_WHEN_IDLE",
-  "valueFrom": { "fieldRef": { "fieldPath": "metadata.annotations['smb-binding.intropy.io/exit-when-idle']" } }
-}]
-```
-
-and set it on the Deployment's pod template:
-
-```yaml
-smb-binding.intropy.io/exit-when-idle: "off"
-```
-
-A value there overrides `--exit-when-idle`; a pod without the annotation gets
-an empty value and keeps the flag. [`component.yaml`](component.yaml) and
-[`deployment.yaml`](deployment.yaml) here do not carry this wiring.
+With `dapr.io/inject-pluggable-components: "true"` the Dapr injector adds the
+binding to `spec.containers`. A pod is only `Succeeded` once **every**
+container has stopped, and nothing stops that container when the app is done,
+so the Job never completes. Earlier versions of the binding could exit by
+themselves for this case (`--exit-when-idle`); that was removed in favour of
+the native sidecar layout above.
