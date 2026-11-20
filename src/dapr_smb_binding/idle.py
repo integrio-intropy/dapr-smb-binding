@@ -6,6 +6,11 @@ shuts daprd down, this process would keep running and the Job would never
 complete. Nothing signals us: the kubelet only does that when the pod is torn
 down, which is exactly what is not happening.
 
+None of this is needed when the pod declares the binding itself as a native
+sidecar: the kubelet stops it once the app has exited. That is the recommended
+layout for Jobs (examples/kubernetes/cronjob.yaml); this watcher remains for
+bindings the injector places.
+
 daprd counts as seen from its first Init: it calls that on our socket before
 anything else, and it reaches us in-process, so it cannot be missed. Polling
 alone can: daprd opens its HTTP port only once every component has loaded, and

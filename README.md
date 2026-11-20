@@ -108,7 +108,15 @@ daprd keeps running, daprd holds a dead connection and every call fails with
 when daprd is up, lists a `bindings.<socket-name>` component and has not called
 the binding's `Init` within 10 s, the binding asks daprd to shut down, and
 Kubernetes restarts it in the same pod, connected. A daprd that does not load
-the component is left alone.
+the component is left alone. This needs a pod where daprd is restarted after it
+exits with code 0: a Deployment, or daprd as a native sidecar, which the
+kubelet restarts under any pod restart policy.
+
+**The first login can outlast Dapr's `initTimeout`.** The binding logs in to
+the share during `Init`, and the first Kerberos login in a pod can take 5 s or
+more. Dapr's default `initTimeout` is 5 s, and daprd exits when it passes. Set
+`initTimeout: 30s` in the Component's `spec` (see
+[examples/kubernetes/component.yaml](examples/kubernetes/component.yaml)).
 
 **Large files don't grow the process.** The image sets
 `MALLOC_MMAP_THRESHOLD_=1048576`. Without it glibc raises its mmap threshold
@@ -145,27 +153,26 @@ See [examples/kubernetes](examples/kubernetes) and
 container's liveness probe at `/healthz` (`--health-port`): it fails when an
 input stream has closed, which the sidecar never reopens by itself.
 
-**Jobs and CronJobs** need the binding to exit by itself. A pod only completes
-once every container has stopped, and Dapr injects this binding as an ordinary
-container, so otherwise a Job would never finish. The Component turns this on
-with `--exit-when-idle` (e.g. `30s`), and **Deployments turn it off** with the
-pod annotation `smb-binding.intropy.io/exit-when-idle: "off"`, which the
-component's container maps to `SMB_BINDING_EXIT_WHEN_IDLE`. One Component
-serves Jobs and Deployments alike, and forgetting the annotation is loud: a
-Deployment's binding restarts and alerts, rather than a Job hanging silently.
-Jobs run with `restartPolicy: OnFailure` and a `backoffLimit`: daprd looks for
-component sockets once, usually before the injected binding is listening, and
-exits; Kubernetes restarts it in the same pod, where the binding is ready. The
-app must leave daprd running when it fails, or its retry finds no sidecar
-(Intropy.Framework: `INTROPY_JOB_SIDECAR_SHUTDOWN=OnSuccess`). See
-[examples/kubernetes](examples/kubernetes/README.md#jobs-and-cronjobs).
+**Jobs and CronJobs** run the binding as a Kubernetes native sidecar: an init
+container with `restartPolicy: Always`, declared in the pod, with daprd
+injected as a native sidecar too (`dapr.io/enable-native-sidecar: "true"`). The
+kubelet starts the binding first, starts daprd once the binding is healthy,
+and stops both when the app has exited. The binding needs no extra flags, and
+the Job can use `restartPolicy: Never`. See
+[examples/kubernetes/cronjob.yaml](examples/kubernetes/cronjob.yaml). Needs
+Kubernetes 1.29 or later.
+
+A binding that Dapr injects into a Job has to exit by itself instead
+(`--exit-when-idle`), because Dapr adds it as an ordinary container that
+nothing stops when the app is done. That still works, with more moving parts;
+see [examples/kubernetes](examples/kubernetes/README.md#if-the-binding-is-injected-into-a-job-instead).
 
 | Flag | Default | |
 |---|---|---|
 | `--socket-name` | `smb` | Socket file name; `spec.type` is `bindings.<name>`. |
 | `--max-message-size` | `5242880` | Raise with the sidecar's `dapr.io/max-body-size`; over 4 MiB needs Dapr 1.19 or later. |
 | `--health-port` | `0` (off) | Serve `/healthz`. |
-| `--exit-when-idle` | off | Exit once the sidecar has been up and then gone this long, e.g. `30s`. Set it on the Component; a pod overrides it with `SMB_BINDING_EXIT_WHEN_IDLE`. |
+| `--exit-when-idle` | off | Exit once the sidecar has been up and then gone this long, e.g. `30s`. Only for a binding that Dapr injects into a Job; leave it off for Deployments and for a binding that runs as a native sidecar. A pod overrides it with `SMB_BINDING_EXIT_WHEN_IDLE`. |
 | `--exit-when-no-sidecar` | `1m` | With idle exit on, also exit if the sidecar never connects within this long, which is what happens when daprd dies before reaching the binding. `0` waits forever. |
 | `--log-level` | `info` | `debug`, `info`, `warning`, `error`. |
 
