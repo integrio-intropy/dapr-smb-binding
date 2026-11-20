@@ -1,0 +1,72 @@
+# A CronJob that runs the binding and daprd as Kubernetes native sidecars (init
+# containers with restartPolicy: Always). The kubelet starts the binding first,
+# starts daprd once the binding answers on /healthz, starts the app, and stops
+# both sidecars when the app has exited. The pod's result is the app's exit code.
+#
+# Needs Kubernetes 1.29 or later. Tested with Dapr 1.19.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: file-job
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          annotations:
+            dapr.io/enabled: "true"
+            dapr.io/app-id: "file-job"
+            # Dapr injects daprd as a native sidecar. The injector appends it to
+            # initContainers, so it comes after the binding declared below.
+            dapr.io/enable-native-sidecar: "true"
+            # The binding below replaces the injected one. Dapr cannot inject a
+            # component in front of a native daprd (dapr/dapr#10778).
+            dapr.io/inject-pluggable-components: "false"
+            # daprd looks for component sockets in this folder (its default).
+            dapr.io/volume-mounts: "dapr-components-sockets:/tmp/dapr-components-sockets"
+        spec:
+          restartPolicy: Never
+          initContainers:
+            - name: smb-binding
+              image: harbor.intropy.io/platform/dapr-smb-binding:0.4.0
+              restartPolicy: Always
+              args: ["--health-port", "9464"]
+              # daprd reads the socket folder once, at startup. /healthz answers
+              # only once the binding listens on its socket, so the probe holds
+              # daprd and the app back until then.
+              startupProbe:
+                httpGet: { path: /healthz, port: 9464 }
+                periodSeconds: 1
+                failureThreshold: 60
+              livenessProbe:
+                httpGet: { path: /healthz, port: 9464 }
+                periodSeconds: 15
+                failureThreshold: 3
+              resources:
+                requests: { cpu: 20m, memory: 64Mi }
+                limits: { memory: 256Mi }
+              securityContext:
+                runAsNonRoot: true
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+                seccompProfile: { type: RuntimeDefault }
+              volumeMounts:
+                - name: smb-binding-runtime
+                  mountPath: /tmp/dapr-smb-binding
+                - name: dapr-components-sockets
+                  mountPath: /tmp/dapr-components-sockets
+          containers:
+            - name: app
+              image: your-registry/file-job:latest
+          volumes:
+            - name: dapr-components-sockets
+              emptyDir: {}
+            # krb5.conf and keytab for the binding. Memory backed, so the keytab
+            # never reaches a node disk.
+            - name: smb-binding-runtime
+              emptyDir:
+                medium: Memory
+                sizeLimit: 1Mi

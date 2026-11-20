@@ -6,21 +6,14 @@ metadata:
     # Dapr injects this container into pods that set
     # dapr.io/inject-pluggable-components: "true". The pod must also define the
     # smb-binding-runtime volume (see deployment.yaml). The injector mounts the
-    # components socket folder itself. --exit-when-idle lets the binding exit
-    # with the sidecar, so a Job can complete. A Deployment's pod turns that off
-    # with the annotation smb-binding.intropy.io/exit-when-idle: "off", mapped to
-    # SMB_BINDING_EXIT_WHEN_IDLE below.
+    # components socket folder itself. A Job or CronJob does not use this
+    # annotation: it declares the container itself, as a native sidecar (see
+    # cronjob.yaml).
     dapr.io/component-container: >
       {
         "name": "smb-binding",
         "image": "harbor.intropy.io/platform/dapr-smb-binding:0.4.0",
-        "args": ["--health-port", "9464", "--exit-when-idle", "30s", "--exit-when-no-sidecar", "30s"],
-        "env": [
-          {
-            "name": "SMB_BINDING_EXIT_WHEN_IDLE",
-            "valueFrom": { "fieldRef": { "fieldPath": "metadata.annotations['smb-binding.intropy.io/exit-when-idle']" } }
-          }
-        ],
+        "args": ["--health-port", "9464"],
         "volumeMounts": [
           { "name": "smb-binding-runtime", "mountPath": "/tmp/dapr-smb-binding" }
         ],
@@ -44,6 +37,9 @@ metadata:
 spec:
   type: bindings.smb
   version: v1
+  # The binding logs in to the share during Init. The first login in a pod can
+  # take 5 s or more, Dapr's default is 5 s, and daprd exits when it passes.
+  initTimeout: 30s
   metadata:
     # --- connection: SFTP-compatible names, plus SMB/Kerberos specifics
     - name: address

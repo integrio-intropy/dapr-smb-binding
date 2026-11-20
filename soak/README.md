@@ -17,6 +17,12 @@ its own workloads, so one run covers both.
 | Jobs | `OnFailure`, `backoffLimit: 5`, `INTROPY_JOB_SIDECAR_SHUTDOWN=OnSuccess`; 2 per binding at a time, back to back ([k8s/job-template.yaml](k8s/job-template.yaml)) | production CronJobs |
 | Deployments | 2 replicas per binding, `exit-when-idle: off`, rounds back to back ([k8s/service.yaml](k8s/service.yaml), [k8s/service-ftp.yaml](k8s/service-ftp.yaml)) | production loaders |
 
+**Out of date.** The Jobs and Components here use the injected layout with idle exit
+(`--exit-when-idle`), which the bindings no longer have: this rig only runs against
+dapr-smb-binding 0.4.2 and dapr-ftp-binding 0.1.0-rc.9 or earlier. It has to move its Jobs
+to native sidecars ([examples/kubernetes/cronjob.yaml](../examples/kubernetes/cronjob.yaml))
+and drop the idle flags before it can test a later version.
+
 The workload ([app/](app/)) uses Intropy.Framework 2.1.0-beta.9's `SmbAdapter` for SMB and
 `SftpAdapter` for FTP (`SOAK_KIND=ftp`), and `JobRunner`, as the components do. A round writes files of 1 KB to 4.5 MB (now and then one of
 16 MiB, the largest prod allows), lists them, reads each back and compares SHA-256, and deletes

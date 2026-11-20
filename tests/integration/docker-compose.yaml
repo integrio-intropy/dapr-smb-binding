@@ -57,12 +57,10 @@ services:
     build:
       context: ../..
     profiles: [dapr]
-    # A Job's pod: the Component's default, no annotation.
     # --max-message-size matches daprd's --max-body-size below.
     command:
       - --log-level=debug
       - --health-port=9464
-      - --exit-when-idle=5s
       - --max-message-size=16777216
     depends_on:
       dc:
